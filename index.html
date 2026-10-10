@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffb703" />
+    <meta
+      name="description"
+      content="小星星故事屋 - 收录寓言、成语、童话、神话、科普与品格故事的儿童故事网站，支持语音朗读。"
+    />
+    <title>小星星故事屋</title>
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('story-house:preferences');
+          if (!raw) return;
+          var data = JSON.parse(raw);
+          var theme = data && data.state && data.state.theme;
+          var allowed = ['sun', 'ocean', 'forest', 'grape', 'sakura', 'night'];
+          if (typeof theme === 'string' && allowed.indexOf(theme) !== -1) {
+            document.documentElement.dataset.theme = theme;
+          }
+        } catch (error) {
+          /* ignore invalid stored preferences */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
