@@ -97,20 +97,29 @@ jobs:
 
       - name: 校验产物齐全（8 个文件 + 校验和）
         run: |
-          set -euo pipefail
+          set -eu
           cd dist-assets
-          COUNT=$(ls -1 | grep -v '^SHA256SUMS.txt$' | wc -l)
+
+          # 用 shell 内建 glob 计数：无匹配时 nullglob 会展开为空，不会报错
+          shopt -s nullglob
+          files=( storyhouse-*.zip storyhouse-*.tar.gz )
+          COUNT=${#files[@]}
           echo "产物数量：$COUNT（期望 8）"
           if [ "$COUNT" -ne 8 ]; then
             echo "::error::产物数量不符，期望 8，实际 $COUNT"
+            printf '  实际文件：%s\n' "${files[@]-（无）}"
             exit 1
           fi
+
           # 逐类确认，缺哪一类都能看出来
-          for pat in 'frontend-*.zip' 'windows-*.zip' 'darwin-*.zip' 'linux-*.tar.gz'; do
-            n=$(ls -1 $pat 2>/dev/null | wc -l)
-            echo "  $pat → $n"
-            [ "$n" -gt 0 ] || { echo "::error::缺少 $pat"; exit 1; }
+          for pat in 'storyhouse-frontend-*.zip' 'storyhouse-windows-*.zip' 'storyhouse-darwin-*.zip' 'storyhouse-linux-*.tar.gz'; do
+            matches=( $pat )
+            echo "  $pat → ${#matches[@]}"
+            [ "${#matches[@]}" -gt 0 ] || { echo "::error::缺少 $pat"; exit 1; }
           done
+
+          [ -f SHA256SUMS.txt ] || { echo "::error::缺少 SHA256SUMS.txt"; exit 1; }
+          echo "✅ 产物校验通过"
 
       - name: 发布到 Release
         uses: softprops/action-gh-release@v2
