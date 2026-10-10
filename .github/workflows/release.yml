@@ -1,0 +1,128 @@
+name: Release
+
+# 推送形如 v1.0.0 的 tag 时触发；也支持在 Actions 页面手动运行（用于验证流水线）。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '手动运行时使用的版本 tag（例如 v1.0.0）'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write # 创建 Release 并上传产物需要写权限
+
+env:
+  NODE_VERSION: '20'
+  GO_VERSION: '1.23'
+
+jobs:
+  build:
+    name: 构建并发布
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 解析版本号
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${{ github.event.inputs.tag }}"
+          else
+            RAW="${GITHUB_REF_NAME}"
+          fi
+          VER="${RAW#v}"          # 去掉前导 v，得到纯版本号（1.0.0）
+          echo "raw=$RAW" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "版本号：$VER（tag：$RAW）"
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建前端
+        # tsc + vite build，产物输出到 go_backend/dist（见 vite.config.ts），供 Go 内嵌
+        run: npm run build
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: 编译全部平台的 Go 后端
+        # 复用仓库脚本，避免与本地构建的产物名/平台列表产生分歧。
+        # STORY_HOUSE_VERSION 让二进制内嵌版本与 Release tag 保持一致。
+        env:
+          STORY_HOUSE_VERSION: ${{ steps.ver.outputs.version }}
+        run: node scripts/build-go.mjs --all
+
+      - name: 打包产物
+        # 前端 → zip；linux 后端 → tar.gz；windows / darwin 后端 → zip
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.version }}"
+          mkdir -p dist-assets
+
+          # 1) 前端静态产物
+          ( cd go_backend/dist && zip -r "$GITHUB_WORKSPACE/dist-assets/storyhouse-frontend-${VER}.zip" . -x '.*' )
+
+          # 2) 各平台 Go 后端（build-go.mjs --all 的输出都在 go_backend/ 下）
+          cd go_backend
+          for BIN in storyhouse-*; do
+            [ -f "$BIN" ] || continue
+            BASE="${BIN%.exe}"          # 去掉 Windows 的 .exe，保证包名统一
+            case "$BIN" in
+              *-linux-*) OUT="dist-assets/${BASE}-${VER}.tar.gz"; tar -czf "../$OUT" "$BIN" ;;
+              *)         OUT="dist-assets/${BASE}-${VER}.zip";    zip -j  "../$OUT" "$BIN" ;;
+            esac
+            echo "已打包 → $(basename "$OUT")"
+          done
+
+          cd "$GITHUB_WORKSPACE"
+
+          # 3) 校验和，便于下载后核对完整性
+          ( cd dist-assets && sha256sum * > SHA256SUMS.txt )
+
+          echo "=== 产物清单 ==="
+          ls -lh dist-assets
+
+      - name: 校验产物齐全（8 个文件 + 校验和）
+        run: |
+          set -euo pipefail
+          cd dist-assets
+          COUNT=$(ls -1 | grep -v '^SHA256SUMS.txt$' | wc -l)
+          echo "产物数量：$COUNT（期望 8）"
+          if [ "$COUNT" -ne 8 ]; then
+            echo "::error::产物数量不符，期望 8，实际 $COUNT"
+            exit 1
+          fi
+          # 逐类确认，缺哪一类都能看出来
+          for pat in 'frontend-*.zip' 'windows-*.zip' 'darwin-*.zip' 'linux-*.tar.gz'; do
+            n=$(ls -1 $pat 2>/dev/null | wc -l)
+            echo "  $pat → $n"
+            [ "$n" -gt 0 ] || { echo "::error::缺少 $pat"; exit 1; }
+          done
+
+      - name: 发布到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.raw }}
+          name: 小星星故事屋 ${{ steps.ver.outputs.raw }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist-assets/storyhouse-frontend-*.zip
+            dist-assets/storyhouse-windows-*.zip
+            dist-assets/storyhouse-darwin-*.zip
+            dist-assets/storyhouse-linux-*.tar.gz
+            dist-assets/SHA256SUMS.txt

@@ -19,8 +19,13 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const backendDir = join(root, 'go_backend');
 
-/** 读取 package.json 的版本号，作为构建版本。 */
+/**
+ * 读取构建版本号。优先取环境变量 STORY_HOUSE_VERSION——CI 里由 git tag 注入，
+ * 保证二进制内嵌版本与 Release 版本一致；未设置时回退到 package.json。
+ */
 function readPkgVersion() {
+  const fromEnv = process.env.STORY_HOUSE_VERSION?.trim();
+  if (fromEnv) return fromEnv.replace(/^v/, '');
   try {
     const raw = readFileSync(join(root, 'package.json'), 'utf8');
     return JSON.parse(raw).version ?? '0.0.0';
@@ -90,6 +95,7 @@ const TARGETS = {
   'windows-arm64': { name: 'storyhouse-windows-arm64.exe', goos: 'windows', goarch: 'arm64', ext: '.exe' },
   'linux-amd64': { name: 'storyhouse-linux-amd64', goos: 'linux', goarch: 'amd64', ext: '' },
   'linux-arm64': { name: 'storyhouse-linux-arm64', goos: 'linux', goarch: 'arm64', ext: '' },
+  'linux-armv7': { name: 'storyhouse-linux-armv7', goos: 'linux', goarch: 'arm', goarm: '7', ext: '' },
   'darwin-amd64': { name: 'storyhouse-darwin-amd64', goos: 'darwin', goarch: 'amd64', ext: '' },
   'darwin-arm64': { name: 'storyhouse-darwin-arm64', goos: 'darwin', goarch: 'arm64', ext: '' },
 };
@@ -124,7 +130,14 @@ function build(key) {
   const result = spawnSync('go', ['build', '-trimpath', `-ldflags=${ldflags}`, '-o', out, '.'], {
     cwd: backendDir,
     stdio: 'inherit',
-    env: { ...process.env, CGO_ENABLED: '0', GOOS: target.goos, GOARCH: target.goarch },
+    env: {
+      ...process.env,
+      CGO_ENABLED: '0',
+      GOOS: target.goos,
+      GOARCH: target.goarch,
+      // ARMv7 需要显式指定 GOARM，否则 go 会拒绝或按默认 v6 编译
+      ...(target.goarm ? { GOARM: target.goarm } : {}),
+    },
   });
   if (result.error) {
     console.error(`[错误] 无法调用 go：${result.error.message}`);
