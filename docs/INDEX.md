@@ -68,5 +68,7 @@
 - [开发指南](./DEVELOPER_GUIDE.md) - 环境搭建、开发规范、新增故事流程与构建发布
 - [Go 后台设计](../go_backend/docs/GO_BACKEND_DESIGN.md) - 单文件后台的架构、模块职责、接口契约与设计决策
 - [Go 后台编译与部署](../go_backend/docs/GO_BACKEND_BUILD_DEPLOY.md) - 最小体积编译、交叉编译矩阵、直接/nohup/systemd 部署
-- [服务端音色音频设计](./specs/2026-10-03-audio-voices/design.md) - 预生成 mp3 的目录约定、后端 API、前端切换逻辑与生产流程
 - [音色音频目录说明](./AUDIO_VOICES.md) - 音频文件夹的命名约定、生成步骤与行为（音频文件本身不入库）
+- [故事配图设计](./specs/2026-10-17-story-images/design.md) - 配图规格、后端接口、前端渐进加载与提示词体系
+- [故事配图目录说明](./STORY_IMAGES.md) - 图片命名、生成流程与后端配置（图片文件本身不入库）
+- [配图生成任务包](./image-handover/README.md) - 交给其他 AI 生图的自包含资料：规格、分类规则、361 条提示词与 CSV

@@ -1,7 +1,7 @@
 {
   "name": "little-star-story-house",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -11,6 +11,10 @@
     "build:go": "npm run build && node scripts/build-go.mjs",
     "build:go:linux": "npm run build && node scripts/build-go.mjs --target linux-amd64",
     "audio:manifest": "node scripts/generate-audio-manifest.mjs",
+    "images:prompts": "node scripts/generate-image-prompts.mjs",
+    "images:status": "node scripts/image-status.mjs",
+    "images:prepare": "python scripts/prepare-story-images.py",
+    "images:handover": "node scripts/build-image-handover.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "build:go:all": "npm run build && node scripts/build-go.mjs --all"

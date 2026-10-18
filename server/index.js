@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.STORY_HOUSE_DATA_DIR || path.join(__dirname, 'data', 'users');
 const AUDIO_DIR = process.env.STORY_HOUSE_AUDIO_DIR || path.join(__dirname, '..', 'audio-voices');
+const IMAGE_DIR = process.env.STORY_HOUSE_IMAGE_DIR || path.join(__dirname, '..', 'story-images');
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3001);
 const HOST = process.env.API_HOST || '0.0.0.0';
 
@@ -229,10 +230,67 @@ async function serveAudio(req, res, voiceId, storyId) {
   createReadStream(file).pipe(res);
 }
 
+// ---- story images ----
+
+/** 确保解析后的路径仍位于图片根目录内。 */
+function isInsideImageDir(target) {
+  const base = path.resolve(IMAGE_DIR);
+  const resolved = path.resolve(target);
+  return resolved === base || resolved.startsWith(base + path.sep);
+}
+
+async function listImageIndex() {
+  let entries;
+  try {
+    entries = await fs.readdir(IMAGE_DIR, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isFile() && /\.jpe?g$/i.test(entry.name))
+    .map((entry) => entry.name.replace(/\.jpe?g$/i, ''))
+    .filter((id) => isSafeSegment(id))
+    .sort();
+}
+
+async function resolveImageFile(storyId) {
+  if (!isSafeSegment(storyId)) return null;
+  const file = path.join(IMAGE_DIR, `${storyId}.jpg`);
+  if (!isInsideImageDir(file)) return null;
+  try {
+    const stat = await fs.stat(file);
+    if (stat.isFile()) return { file, stat };
+  } catch {
+    // not found
+  }
+  return null;
+}
+
+async function serveImage(req, res, storyId) {
+  const resolved = await resolveImageFile(storyId);
+  if (!resolved) {
+    sendJson(res, 404, { error: 'image not found' });
+    return;
+  }
+  const { file, stat } = resolved;
+  res.writeHead(200, {
+    'Content-Type': 'image/jpeg',
+    'Content-Length': String(stat.size),
+    // 图片可能被重新生成（同名换内容），不用 immutable
+    'Cache-Control': 'public, max-age=86400',
+    'Last-Modified': stat.mtime.toUTCString(),
+    'Access-Control-Allow-Origin': '*',
+  });
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+  createReadStream(file).pipe(res);
+}
+
 function userPath(key) {
   return path.join(DATA_DIR, `${key}.json`);
 }
-
 async function readUserFile(key) {
   try {
     const raw = await fs.readFile(userPath(key), 'utf8');
@@ -316,7 +374,10 @@ const server = createServer(async (req, res) => {
         ok: true,
         mode: 'server',
         storage: 'file',
-        features: { audioVoices: (await listVoices()).length > 0 },
+        features: {
+          audioVoices: (await listVoices()).length > 0,
+          coverImages: (await listImageIndex()).length > 0,
+        },
         time: new Date().toISOString(),
       });
       return;
@@ -347,6 +408,23 @@ const server = createServer(async (req, res) => {
           await serveAudio(req, res, voiceId, storyId);
           return;
         }
+      }
+      sendJson(res, 404, { error: 'not found' });
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/images') {
+      const storyIds = await listImageIndex();
+      sendJson(res, 200, { count: storyIds.length, storyIds });
+      return;
+    }
+
+    if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/api/images/')) {
+      const tail = pathname.slice('/api/images/'.length);
+      if (tail.toLowerCase().endsWith('.jpg')) {
+        const storyId = decodeURIComponent(tail.slice(0, -'.jpg'.length));
+        await serveImage(req, res, storyId);
+        return;
       }
       sendJson(res, 404, { error: 'not found' });
       return;
@@ -398,4 +476,5 @@ server.listen(PORT, HOST, () => {
   console.log(`[story-house] API server listening on http://${HOST}:${PORT}`);
   console.log(`[story-house] user data directory: ${DATA_DIR}`);
   console.log(`[story-house] audio voices directory: ${AUDIO_DIR}`);
+  console.log(`[story-house] story images directory: ${IMAGE_DIR}`);
 });

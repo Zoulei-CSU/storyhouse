@@ -147,20 +147,35 @@ export function getUserRepository(force?: boolean): Promise<UserRepository>;
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/api/health` | 健康检查，返回 `{ ok, mode: 'server', storage: 'file' \| 'memory', features: { audioVoices }, build: { version, buildTime, gitCommit } }` |
+| `GET` | `/api/health` | 健康检查，返回 `{ ok, mode: 'server', storage: 'file' \| 'memory', features: { audioVoices, coverImages }, build: { version, buildTime, gitCommit } }` |
 | `POST` | `/api/users` | body `{ name }`，按名字创建或读取用户 |
 | `GET` | `/api/users/:name` | 读取用户，不存在返回 404 |
 | `PUT` | `/api/users/:name` | 局部更新 `UserProfilePatch`，返回更新后的用户 |
 | `GET` | `/api/voices` | 音色列表（遍历音频目录的子文件夹），无音频目录时返回空数组 |
 | `GET` | `/api/voices/:voice/index` | 该音色已存在音频的故事 id 列表 |
 | `GET` | `/api/voices/:voice/:id.mp3` | 返回音频，支持 `Range` 断点续播；缺文件返回 404 |
+| `GET` | `/api/images` | 已生成配图的故事 id 列表 `{ count, storyIds }` |
+| `GET/HEAD` | `/api/images/:id.jpg` | 返回配图；缺文件返回 404 |
 
 项目内置两种等价的后台实现，前端无需区分：
 
 - **Node 后台 `server/index.js`**：零依赖 `node:http`，端口取 `API_PORT`/`PORT`（默认 3001），用户文件存放于 `server/data/`（已 gitignore）
-- **Go 单文件后台 `go_backend/main.go`**：用 `//go:embed all:dist` 把构建后的 `go_backend/dist/` 内嵌进二进制，单文件即可完整运行；启动时从控制台读取绑定端口、URL 前缀与用户数据目录
+- **Go 单文件后台 `go_backend/main.go`**：用 `//go:embed all:dist` 把构建后的 `go_backend/dist/` 内嵌进二进制，单文件即可完整运行；启动时从控制台读取绑定端口、URL 前缀、用户数据目录、音色目录与配图目录
 
 用户文件名为名字的 base64url 编码，文件内容即 `UserProfile`；两种实现命名规则一致，可互相读取。
+
+### imageRepository
+
+`src/services/imageRepository.ts`，故事配图的地址与缺失缓存。
+
+```ts
+export function storyImageUrl(storyId: string): string; // /api/images/<id>.jpg
+export function isKnownMissing(storyId: string): boolean;
+export function markMissing(storyId: string): void;
+```
+
+- 缺失记录保存在模块级 `Set`，切页时不会重复请求同一张不存在的图
+- 是否发起请求由调用方先经 `detectStorageMode()` 判断，纯前端部署不会请求
 
 ### Go 单文件后台
 
@@ -330,7 +345,8 @@ function useStoryFilter(filter: StoryFilter): {
 | 组件 | 关键 Props | 说明 |
 |------|-----------|------|
 | `StoryCard` | `story: Story`, `onOpen?: (id) => void` | 列表卡片，展示封面、标题、寓意摘要、时长与收藏按钮 |
-| `StoryCover` | `story: Story`, `size?: 'sm' \| 'md' \| 'lg'` | 根据 `cover` 渲染插画/emoji/渐变背景 |
+| `StoryCover` | `story: Story`, `size?: 'sm' \| 'md' \| 'lg'`, `withImage?: boolean`, `onImageClick?: () => void` | 根据 `cover` 渲染插画/emoji/渐变背景；`withImage` 开启后空闲时加载真实配图并淡入覆盖；真实图加载完成后点击封面触发 `onImageClick` |
+| `StoryImageLightbox` | `open: boolean`, `src: string`, `alt: string`, `onClose: () => void` | 插画大图浏览弹层；portal 挂载到 body，支持 Esc、点击遮罩关闭，打开时锁定背景滚动并管理焦点 |
 | `StoryReader` | `story: Story`, `currentParagraph?: number` | 渲染分段正文并高亮当前朗读段 |
 | `SpeechBar` | `narration: UseNarrationResult`, `rate: number`, `onRateChange: (n) => void`, `voices: VoiceOption[]`, `source: NarrationSource`, `onSourceChange: (s) => void` | 朗读条：播放/暂停/停止、声音来源切换、TTS 下的语速控制 |
 | `SearchBar` | `value: string`, `onChange: (v) => void`, `placeholder?: string` | 受控搜索框，带防抖 |

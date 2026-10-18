@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { SpeechBar } from '@/components/audio/SpeechBar';
 import { Button } from '@/components/common/Button';
 import { StoryCover } from '@/components/story/StoryCover';
+import { StoryImageLightbox } from '@/components/story/StoryImageLightbox';
 import { StoryMeta } from '@/components/story/StoryMeta';
 import { StoryReader } from '@/components/story/StoryReader';
 import { allStories, getStory } from '@/data/stories';
 import { useNarration } from '@/hooks/useNarration';
+import { storyImageUrl } from '@/services/imageRepository';
 import { audioUrl, fetchVoices, getVoiceIndex } from '@/services/voiceRepository';
 import { useFavoritesStore } from '@/store/favoritesStore';
 import { usePreferencesStore, type FontSize } from '@/store/preferencesStore';
@@ -39,6 +41,9 @@ export function StoryDetailPage() {
   // 音色列表是否已探测完成。避免在列表尚未返回时把用户已保存的音色误判为失效。
   const [voicesReady, setVoicesReady] = useState(false);
   const [voiceIndex, setVoiceIndex] = useState<Set<string>>(() => new Set());
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  // 保持引用稳定：灯箱的 Esc/焦点副作用依赖 onClose，回调每次新建会反复重建监听
+  const closeLightbox = useCallback(() => setLightboxOpen(false), []);
 
   const paragraphs = story?.paragraphs ?? EMPTY_PARAGRAPHS;
   const storyId = story?.id ?? '';
@@ -94,6 +99,8 @@ export function StoryDetailPage() {
 
   useEffect(() => {
     if (story) markAsRead(story.id);
+    // 切换到别的故事时，若大图还开着，先关掉
+    setLightboxOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [story, markAsRead]);
 
@@ -127,7 +134,7 @@ export function StoryDetailPage() {
       </button>
 
       <header className="toy-card flex flex-col gap-4 p-4 sm:p-6">
-        <StoryCover story={story} size="lg" />
+        <StoryCover story={story} size="lg" withImage onImageClick={() => setLightboxOpen(true)} />
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-extrabold text-ink-strong sm:text-3xl">{story.title}</h1>
@@ -208,6 +215,13 @@ export function StoryDetailPage() {
           </Link>
         ) : null}
       </nav>
+
+      <StoryImageLightbox
+        open={lightboxOpen}
+        src={storyImageUrl(story.id)}
+        alt={`《${story.title}》的插画`}
+        onClose={closeLightbox}
+      />
     </main>
   );
 }

@@ -196,3 +196,7 @@ server/data/
 /audio-voices/**/*.m4a
 /audio-voices/**/*.ogg
 
+# Story House generated illustrations (large, upload to server separately)
+/story-images/**/*.jpg
+/story-images/**/*.jpeg
+

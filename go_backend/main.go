@@ -483,6 +483,78 @@ func (s *server) serveAudio(w http.ResponseWriter, r *http.Request, voiceID, sto
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
+// ---- story images ----
+
+// 图片只认 .jpg（大小写不敏感）。如需其它格式，在此扩展即可。
+func imageExtension(name string) string {
+	if strings.ToLower(filepath.Ext(name)) == ".jpg" {
+		return ".jpg"
+	}
+	return ""
+}
+
+func (s *server) resolveImageFile(storyID string) (string, os.FileInfo, bool) {
+	if strings.TrimSpace(s.imageDir) == "" || !isSafeSegment(storyID) {
+		return "", nil, false
+	}
+	filePath := filepath.Join(s.imageDir, storyID+".jpg")
+	if !isInsideDir(s.imageDir, filePath) {
+		return "", nil, false
+	}
+	info, err := os.Stat(filePath)
+	if err == nil && !info.IsDir() {
+		return filePath, info, true
+	}
+	return "", nil, false
+}
+
+func (s *server) serveImage(w http.ResponseWriter, r *http.Request, storyID string) {
+	filePath, info, ok := s.resolveImageFile(storyID)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "image not found"})
+		return
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "image not found"})
+		return
+	}
+	defer file.Close()
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	// 图片可能被重新生成（同名换内容），所以不用 immutable；带 ETag 回源校验成本很低。
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+// listImageIndex 返回已有配图的故事 id，用于覆盖率统计与预检。
+func (s *server) listImageIndex() []string {
+	ids := []string{}
+	if strings.TrimSpace(s.imageDir) == "" {
+		return ids
+	}
+	entries, err := os.ReadDir(s.imageDir)
+	if err != nil {
+		return ids
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		ext := imageExtension(name)
+		if ext == "" {
+			continue
+		}
+		base := strings.TrimSuffix(name, ext)
+		if isSafeSegment(base) {
+			ids = append(ids, base)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // ---- http server ----
 
 type server struct {
@@ -491,9 +563,10 @@ type server struct {
 	index    []byte
 	assets   fs.FS
 	audioDir string
+	imageDir string
 }
 
-func newServer(prefix string, st store, audioDir string) (*server, error) {
+func newServer(prefix string, st store, audioDir, imageDir string) (*server, error) {
 	assets, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, err
@@ -508,6 +581,7 @@ func newServer(prefix string, st store, audioDir string) (*server, error) {
 		index:    injectConfig(rawIndex, prefix),
 		assets:   assets,
 		audioDir: audioDir,
+		imageDir: imageDir,
 	}, nil
 }
 
@@ -576,12 +650,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *server) serveAPI(w http.ResponseWriter, r *http.Request, rest string) {
 	if rest == "/api/health" && r.Method == http.MethodGet {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":       true,
-			"mode":     "server",
-			"storage":  s.store.label(),
-			"features": map[string]any{"audioVoices": len(s.listVoices()) > 0},
-			"time":     time.Now().UTC().Format(time.RFC3339),
-			"build":    versionInfo(),
+			"ok":      true,
+			"mode":    "server",
+			"storage": s.store.label(),
+			"features": map[string]any{
+				"audioVoices": len(s.listVoices()) > 0,
+				"coverImages": len(s.listImageIndex()) > 0,
+			},
+			"time":  time.Now().UTC().Format(time.RFC3339),
+			"build": versionInfo(),
 		})
 		return
 	}
@@ -618,6 +695,27 @@ func (s *server) serveAPI(w http.ResponseWriter, r *http.Request, rest string) {
 				s.serveAudio(w, r, voiceID, storyID)
 				return
 			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	if rest == "/api/images" && r.Method == http.MethodGet {
+		ids := s.listImageIndex()
+		writeJSON(w, http.StatusOK, map[string]any{"count": len(ids), "storyIds": ids})
+		return
+	}
+
+	if strings.HasPrefix(rest, "/api/images/") && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		tail := strings.TrimPrefix(rest, "/api/images/")
+		if strings.HasSuffix(strings.ToLower(tail), ".jpg") {
+			storyID, err := urlPathUnescape(tail[:len(tail)-len(".jpg")])
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid story id"})
+				return
+			}
+			s.serveImage(w, r, storyID)
+			return
 		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -875,6 +973,16 @@ func prompt(reader *bufio.Reader, label, fallback string) string {
 	return line
 }
 
+// 目录参数里 - / none / 无 都表示关闭对应功能，返回空字符串。
+func dirOrDisabled(input string) string {
+	trimmed := strings.TrimSpace(input)
+	switch trimmed {
+	case "-", "none", "无":
+		return ""
+	}
+	return trimmed
+}
+
 // 这些值在编译时通过 -ldflags -X 注入，见 scripts/build-go.mjs。
 // 便于用户在内嵌页面「关于」中确认自己跑的是哪个版本。
 var (
@@ -891,56 +999,45 @@ func versionInfo() map[string]string {
 	}
 }
 
-
 const helpText = `小星星故事屋 · 单文件服务器
-
-把前端静态资源与用户数据 API 打包进一个可执行文件。运行时不需要 Node.js，
-也不需要额外的静态文件目录。
+内嵌前端与用户数据 API，单文件运行，无需 Node.js。
 
 用法:
   storyhouse [选项]
 
-不带任何选项运行时，会以问答方式依次询问：绑定端口、URL 前缀、用户数据目录、音色音频目录。
+  不带选项运行时进入问答模式，依次询问端口、URL 前缀、数据目录、音频目录与配图目录。
 
 选项:
-  --port <int>          监听端口，范围 1-65535，默认 8080
-  --prefix <path>       URL 前缀，例如 /story；默认 /（根路径部署）
-  --data-dir <path>     用户数据存储目录
-                        留空表示仅使用内存存储，进程退出后数据丢失；
-                        填写目录则按用户名落盘为 JSON 文件
-  --audio-dir <path>    音色音频目录，默认 audio-voices
-                        目录下每个子文件夹即一个音色，文件夹内放 <故事id>.mp3；
-                        目录不存在时音色功能自动关闭，仅保留浏览器朗读
-  --version             显示版本号并退出
-  -h, --help            显示本帮助并退出
+  --port <int>        监听端口，范围 1-65535（默认 8080）
+  --prefix <path>     URL 前缀，如 /story（默认 /，即根路径部署）
+  --data-dir <path>   用户数据目录（默认空，仅存内存，进程退出即丢失）
+  --audio-dir <path>  音色音频目录（默认 audio-voices；设为 - 表示关闭）
+  --image-dir <path>  故事配图目录（默认 story-images；设为 - 表示关闭）
+  --version           显示版本号并退出
+  -h, --help          显示本帮助并退出
 
 示例:
   storyhouse
-      交互式启动，依次输入端口 / URL 前缀 / 数据目录 / 音频目录
+      问答模式，依次输入各项配置
 
-  storyhouse --port 8080
-      监听 8080，根路径，用户数据仅保存在内存中
+  storyhouse --port 9000
+      监听 9000，其余使用默认值（根路径、内存存储）
 
-  storyhouse --port 9000 --prefix /story --data-dir /var/lib/storyhouse --audio-dir /data/audio-voices
-      监听 9000，在 /story/ 下提供服务，用户数据落盘，音色音频来自指定目录
+  storyhouse --prefix /story --data-dir /var/lib/storyhouse
+      在 /story/ 下提供服务，用户数据落盘到指定目录
 
-  storyhouse --data-dir /var/lib/storyhouse
-      使用默认端口 8080 与根路径，用户数据落盘，音频目录默认 audio-voices
+  storyhouse --audio-dir -
+      关闭音色朗读，仅保留浏览器 TTS
 
-HTTP 接口（<prefix> 为 URL 前缀，根部署时为空）:
-  GET  <prefix>/api/health                健康检查，返回存储模式与可用能力
-  POST <prefix>/api/users                 body {"name": "..."}，按名字创建或读取用户
-  GET  <prefix>/api/users/:name           读取用户，不存在返回 404
-  PUT  <prefix>/api/users/:name           局部更新用户资料
-  GET  <prefix>/api/voices                音色列表（遍历音频目录的子文件夹）
-  GET  <prefix>/api/voices/:voice/index   该音色已有音频的故事 id 列表
-  GET  <prefix>/api/voices/:voice/:id.mp3 返回音频，支持 Range 断点续播
+  storyhouse --image-dir ./story-images
+      为故事详情页加载 AI 插画（文件名为 <故事id>.jpg）
 
-部署提示:
-  - 子路径部署时前端资源与接口都会带上 URL 前缀，无需额外配置
-  - 用户数据目录留空时适合临时演示；长期保存请显式指定 --data-dir
-  - 音频目录必须包含读权限；文件按 <故事id>.mp3 命名，故事 id 见 docs/audio/voice-manifest.json
-  - 可通过 systemd 或 nohup 常驻运行，详见 go_backend/docs/GO_BACKEND_BUILD_DEPLOY.md
+说明:
+  数据目录留空时数据仅存内存，适合临时演示；需要长期保存请显式指定 --data-dir。
+  音频目录下每个子文件夹即一个音色，内放 <故事id>.mp3，故事 id 见
+  docs/audio/voice-manifest.json；目录不存在时音色功能自动关闭。
+  配图目录内放 <故事id>.jpg；缺失的图片由前端回退为图标封面，不影响使用。
+  完整的部署方式与 HTTP 接口说明见 go_backend/docs/GO_BACKEND_BUILD_DEPLOY.md。
 `
 
 func main() {
@@ -950,6 +1047,7 @@ func main() {
 	prefixFlag := flags.String("prefix", "", "URL 前缀")
 	dataDirFlag := flags.String("data-dir", "", "用户数据目录")
 	audioDirFlag := flags.String("audio-dir", "audio-voices", "音色音频目录")
+	imageDirFlag := flags.String("image-dir", "story-images", "故事配图目录")
 	versionFlag := flags.Bool("version", false, "显示版本号")
 	flags.Usage = func() { fmt.Fprint(flags.Output(), helpText) }
 
@@ -974,6 +1072,7 @@ func main() {
 	prefix := "/"
 	dataDir := ""
 	audioDir := "audio-voices"
+	imageDir := "story-images"
 
 	if len(provided) == 0 {
 		reader := bufio.NewReader(os.Stdin)
@@ -992,12 +1091,8 @@ func main() {
 
 		prefix = normalizePrefix(prompt(reader, "URL 前缀（如 /story，直接回车表示根路径 /）", "/"))
 		dataDir = strings.TrimSpace(prompt(reader, "用户数据存储目录（留空则仅存内存，退出即丢失）", ""))
-		audioInput := strings.TrimSpace(prompt(reader, "音色音频目录（每个子文件夹一个音色；输入 - 表示不使用）", "audio-voices"))
-		if audioInput == "-" || audioInput == "none" || audioInput == "无" {
-			audioDir = ""
-		} else if audioInput != "" {
-			audioDir = audioInput
-		}
+		audioDir = dirOrDisabled(prompt(reader, "音色音频目录（每个子文件夹一个音色；输入 - 表示不使用）", "audio-voices"))
+		imageDir = dirOrDisabled(prompt(reader, "故事配图目录（放 <故事id>.jpg；输入 - 表示不使用）", "story-images"))
 	} else {
 		if provided["port"] {
 			if *portFlag < 1 || *portFlag > 65535 {
@@ -1008,7 +1103,9 @@ func main() {
 		}
 		prefix = normalizePrefix(*prefixFlag)
 		dataDir = strings.TrimSpace(*dataDirFlag)
-		audioDir = strings.TrimSpace(*audioDirFlag)
+		// 与问答模式保持一致：- 表示关闭该功能
+		audioDir = dirOrDisabled(*audioDirFlag)
+		imageDir = dirOrDisabled(*imageDirFlag)
 	}
 
 	var st store
@@ -1023,7 +1120,7 @@ func main() {
 		st = fileStore
 	}
 
-	srv, err := newServer(prefix, st, audioDir)
+	srv, err := newServer(prefix, st, audioDir, imageDir)
 	if err != nil {
 		log.Fatalf("[错误] 初始化静态资源失败（请先执行 npm run build）: %v", err)
 	}
@@ -1041,6 +1138,11 @@ func main() {
 		fmt.Println("音色音频: 已关闭（仅浏览器朗读）")
 	} else {
 		fmt.Printf("音色音频: %s\n", audioDir)
+	}
+	if strings.TrimSpace(imageDir) == "" {
+		fmt.Println("故事配图: 已关闭（使用图标封面）")
+	} else {
+		fmt.Printf("故事配图: %s（%d 张）\n", imageDir, len(srv.listImageIndex()))
 	}
 	fmt.Println("按 Ctrl+C 停止服务")
 	fmt.Println("--------------------------------------------------")
