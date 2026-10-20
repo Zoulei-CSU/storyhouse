@@ -76,15 +76,13 @@ export function useNarration({
 
   const { stop: ttsStop } = tts;
 
-  // 切换来源 / 切换故事 / 音频地址变化时，停止另一条路径并清理本次播放。
-  // 目的：切歌后不会继续朗读上一个故事，用户需重新点「朗读故事」。
+  // 切换来源 / 切换故事 / 音频地址变化时，两条路径都要停。
+  // 音色模式下如果只停 TTS，旧的 Audio 元素会留在 ref 里，
+  // 下一篇 play() 复用它，就会继续播上一篇的音频。
   useEffect(() => {
     setVoiceError(null);
-    if (voiceMode) {
-      ttsStop();
-    } else {
-      teardownAudio();
-    }
+    ttsStop();
+    teardownAudio();
   }, [voiceMode, voiceId, storyId, audioSrc, ttsStop, teardownAudio]);
 
   useEffect(() => () => teardownAudio(), [teardownAudio]);
@@ -101,6 +99,11 @@ export function useNarration({
         return;
       }
       let audio = audioRef.current;
+      // 防御：元素绑定的还是别的地址时重建，避免切换故事后仍播上一篇
+      if (audio && audio.getAttribute('src') !== audioSrc) {
+        teardownAudio();
+        audio = null;
+      }
       if (!audio) {
         audio = new Audio(audioSrc);
         audio.preload = 'auto';

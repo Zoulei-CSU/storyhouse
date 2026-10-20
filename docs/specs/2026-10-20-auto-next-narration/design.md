@@ -252,3 +252,34 @@ useEffect(() => {
 **过程里踩的坑**：`StoryDetailPage` 用了 `useRef` 但没加进 import，
 `tsc --noEmit` 因为 React 的 UMD 全局声明没有报错，页面在浏览器里直接白屏。
 类型检查通过不等于能跑，浏览器实测这一步不能省。
+
+### 上线后修复：页面切了，念的还是第一篇
+
+v1.0.3 在服务器实测发现：连续播放时页面正常切到下一篇，但朗读的一直是第一篇，
+连切多篇也一样。
+
+**原因**：`useNarration` 在切换故事时只做了「停另一条路径」——
+
+```ts
+if (voiceMode) {
+  ttsStop();        // 只停了 TTS
+} else {
+  teardownAudio();  // 只在 TTS 模式下销毁音频
+}
+```
+
+音色模式下旧的 `<audio>` 元素留在 `audioRef` 里，它的 `src` 仍绑着第一篇；
+`play()` 看到 ref 里有元素就直接 `play()`，于是永远播第一篇。
+
+**修复**（两处）：
+
+1. 切歌时两条路径都清理：`ttsStop(); teardownAudio();`
+2. `play()` 增加防御：元素 `src` 与当前 `audioSrc` 不一致时重建
+
+**验证**：用 `FakeAudio` 记录实例（本机无真实音频），跑完一篇后触发 `onended`：
+
+| 断言 | 结果 |
+|---|---|
+| 第一个实例 src | `.../fairy-cinderella.mp3` |
+| 跳转后新增实例 | `.../fairy-snow-white.mp3`，`paused=false` |
+| 旧实例 | `onended` 已清空、`paused=true` |

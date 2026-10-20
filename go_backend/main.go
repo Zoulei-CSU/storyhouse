@@ -1111,42 +1111,54 @@ func versionInfo() map[string]string {
 const helpText = `小星星故事屋 · 单文件服务器
 内嵌前端与用户数据 API，单文件运行，无需 Node.js。
 
-用法:
+用法
   storyhouse [选项]
 
-  不带选项运行时进入问答模式，依次询问端口、URL 前缀、数据目录、音频目录与配图目录。
+  不带任何选项时进入问答模式，依次询问端口、URL 前缀、数据目录、音频目录与配图目录。
 
-选项:
-  --port <int>        监听端口，范围 1-65535（默认 8080）
-  --prefix <path>     URL 前缀，如 /story（默认 /，即根路径部署）
-  --data-dir <path>   用户数据目录（默认空，仅存内存，进程退出即丢失）
-  --audio-dir <path>  音色音频目录（默认 audio-voices；设为 - 表示关闭）
-  --image-dir <path>  故事配图目录（默认 story-images；目录下一级子目录各放 <故事id>.jpg；设为 - 表示关闭）
-  --version           显示版本号并退出
-  -h, --help          显示本帮助并退出
+选项
+  服务
+    --port <int>        监听端口，1-65535（默认 8080）
+    --prefix <path>     URL 前缀，如 /story（默认 /，根路径部署）
 
-示例:
+  目录
+    --data-dir <path>   用户数据目录；留空则仅存内存，退出即丢失
+    --audio-dir <path>  音色音频目录（默认 audio-voices；设为 - 关闭）
+    --image-dir <path>  故事配图目录（默认 story-images；设为 - 关闭）
+
+  其它
+    --version           显示版本号与构建信息后退出
+    -h, --help          显示本帮助后退出
+
+示例
   storyhouse
       问答模式，依次输入各项配置
 
   storyhouse --port 9000
-      监听 9000，其余使用默认值（根路径、内存存储）
+      监听 9000，其余用默认值（根路径、内存存储）
 
   storyhouse --prefix /story --data-dir /var/lib/storyhouse
-      在 /story/ 下提供服务，用户数据落盘到指定目录
+      在 /story/ 下提供服务，用户数据落盘
 
-  storyhouse --audio-dir -
-      关闭音色朗读，仅保留浏览器 TTS
+  storyhouse --audio-dir - --image-dir -
+      关闭音色朗读与配图，只提供故事内容
 
-  storyhouse --image-dir ./story-images
-      为故事详情页加载 AI 插画（文件名为 <故事id>.jpg）
+  storyhouse --image-dir ./story-images --audio-dir ./audio-voices
+      加载插画与音色音频
 
-说明:
-  数据目录留空时数据仅存内存，适合临时演示；需要长期保存请显式指定 --data-dir。
-  音频目录下每个子文件夹即一个音色，内放 <故事id>.mp3，故事 id 见
-  docs/audio/voice-manifest.json；目录不存在时音色功能自动关闭。
-  配图目录内放 <故事id>.jpg；缺失的图片由前端回退为图标封面，不影响使用。
-  完整的部署方式与 HTTP 接口说明见 go_backend/docs/GO_BACKEND_BUILD_DEPLOY.md。
+目录约定
+  音色   <音频目录>/<音色名>/<故事id>.mp3
+         每个子文件夹是一个音色，文件夹名即音色 id 与显示名
+
+  配图   <配图目录>/<图片集>/<故事id>.jpg
+         只读一级子目录；同一故事放在多个子目录里即多张图
+         根目录下平铺的 jpg 不会被读取
+
+说明
+  数据目录留空时数据仅存内存，适合临时演示；长期使用请显式指定 --data-dir。
+  音频或配图目录不存在、为空时，对应功能自动关闭，不报错。
+  配图与音色缺失时前端会明确提示，不会静默回退。
+  部署方式与 HTTP 接口说明见 go_backend/docs/GO_BACKEND_BUILD_DEPLOY.md。
 `
 
 func main() {
