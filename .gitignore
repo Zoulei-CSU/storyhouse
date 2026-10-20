@@ -191,6 +191,9 @@ server/data/
 # Publish credential (ticket), kept local only
 /docs/PUBLISH_TICKET.md
 
+# Local task record, not for publishing
+/docs/IMAGE_TASK_STATUS.md
+
 # Story House generated audio (large, upload to server separately)
 /audio-voices/**/*.mp3
 /audio-voices/**/*.m4a

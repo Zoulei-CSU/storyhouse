@@ -1,0 +1,68 @@
+{
+  "origin": {
+    "cn": [
+      "character-blind-men-and-the-elephant",
+      "character-little-horse-crosses-the-river",
+      "character-the-crow-feeds-its-parents",
+      "mr-dongguo-and-the-wolf",
+      "the-camel-and-the-drifting-sand",
+      "the-carpenter-and-the-axe",
+      "the-fish-in-the-dry-rut",
+      "the-frog-and-the-well",
+      "the-lost-sheep-at-the-crossroads",
+      "the-mantis-stalks-the-cicada",
+      "the-owl-moves-house",
+      "the-parrot-and-the-fire",
+      "zengzi-kills-the-pig",
+      "the-elephant-and-the-pug"
+    ],
+    "ru": [
+      "demyans-soup",
+      "the-quartet",
+      "the-swan-the-pike-and-the-crayfish",
+      "fairy-fisherman-and-goldfish"
+    ],
+    "cnFairy": [
+      "fairy-the-nightingle"
+    ]
+  },
+  "scenes": {
+    "the-astrologer": "A field path at night in ancient Greece; a thin scholar in a simple wool chiton and a himation draped over one shoulder walks with his head tipped far back, eyes on the stars, a rolled papyrus scroll in one hand, one bare foot already over the edge of an open stone well; his expression is rapt and utterly unaware; a small clay oil lamp lies forgotten on the grass behind him. Dry cypress silhouettes, deep blue night, bright stars, soft moonlight, gentle comic irony.",
+
+    "the-ant-and-the-dove": "A pond edge with a floating leaf in ancient Greece; a tiny black ant rides the leaf safely, waving thanks with one leg; on a low olive branch above, a soft grey dove looks down with a kind tilt of its head; in the background a hunter in a coarse wool tunic crouches behind a bush, a simple wooden bow half-raised, unaware of the ant creeping toward his sandalled foot. Green water, reeds, bright morning.",
+
+    "the-farmer-and-his-dog": "A storm-washed dirt road with a broken stone bridge; a farmer in a coarse wool cloak huddles under a thatched lean-to, arms wrapped around himself, looking anxiously toward home; a shaggy brown dog arrives at a run, soaked, tail wagging hard, turning back as if to lead the way up a slope; rain easing, grey-gold light, loyal warm mood.",
+
+    "the-fisherman-and-the-little-fish": "A misty lakeside at dusk in ancient Greece; a fisherman in a rough wool tunic with a rope belt kneels by a woven willow basket, holding up a small silver fish in one hand, considering it with a doubtful squint; the fish's mouth is open as if pleading; a simple reed fishing rod leans against a rock, the empty basket beside him. Calm water, fading light, quiet mood.",
+
+    "the-fox-and-the-mask": "A cluttered ancient Greek actor's dressing room; an orange fox sits on a low wooden stool holding up a painted theatrical mask with a tragic open mouth and arched brows, turning it over with both paws; the fox's own expression is sorrowful and wry; a shelf of comic and tragic masks, a folded linen costume, a bronze hand mirror. Warm dusty light through a high window, theatrical mood.",
+
+    "the-herdsman-and-the-lost-bull": "A hillside shrine in ancient Greece: a small whitewashed altar with a stone statue of a shepherd god, a few olive branches and a clay cup laid on it; a herdsman in a coarse wool tunic kneels with both hands raised, face earnest in a big promise; behind him, tied to an olive tree, a small calf nuzzles its mother, and a fine large bull grazes peacefully further off. Warm dusk, olive hills, ironic warmth.",
+
+    "the-thief-and-his-mother": "A modest ancient Greek home interior; a small boy in a plain wool tunic holds out a wooden wax writing tablet to his mother with a proud, hopeful grin; the mother in a simple draped dress claps her hands and smiles indulgently; in the background through a doorway, a sunlit courtyard where children practise letters is visible. Warm oil-lamp light, plaster walls, gentle foreshadowing.",
+
+    "the-ass-and-his-shadow": "A dusty road at high noon in ancient Greece with a very short shadow under a grey donkey; a traveller in a simple wool tunic crouches in the donkey's small shade, fanning himself with a straw hat, while the donkey's owner in a coarse cloak stands over him pointing at the animal, red-faced; the donkey's ears are back, about to bolt. Bare hills, heat haze, comic argument.",
+
+    "the-miser-and-his-gold": "A small walled garden at dusk in ancient Greece; a thin old man in a plain wool cloak kneels beside a shallow hole in the earth, both hands pressed to his cheeks, mouth open in a wail, tears on his cheeks; the hole is empty; beside him a neighbour with a wooden hoe leans on it, eyebrows raised, gesturing at the man's patched clothes and empty purse. Loose soil, a stone, soft blue light, wry tone.",
+
+    "the-travelers-and-the-axe": "A forest road in ancient Greece; a man in a plain wool tunic holds up a shiny bronze axe with a gleeful grin, showing it to his companion; the companion in a shorter tunic spreads both hands emphatically, eyebrows raised; behind them along the road, an angry woodcutter in a leather apron runs toward them, one arm raised. Pines, dust, comic tension.",
+
+    "the-sick-man-and-the-doctor": "A bedroom interior in ancient Greece; a pale man in a rumpled linen sleeping tunic sits up in bed, one hand on his stomach, gesturing dreamily with the other as if describing a pleasant walk; a doctor in a plain himation sits on a stool beside the bed, taking his pulse with two fingers, eyebrows raised sceptically; on the bedside table an empty bowl and a pile of snack crumbs. Soft lamp light, plaster walls.",
+
+    "demyans-soup": "A Russian log cottage interior with carved window frames and a lace curtain; a stout host in a belted linen shirt and a full beard holds a steaming bowl of fish soup out to his guest with both hands, eyes eager; the guest, a thin bearded man in a plain coat, leans back with a strained polite smile, one hand on his full stomach, cheeks slightly green; several empty bowls stacked beside a samovar. Warm lamp light, woven rug, gentle comedy.",
+
+    "the-quartet": "A birch grove clearing in old Russia; a monkey with a violin, a donkey with a cello, a goat with a wooden flute and a bear with a drum sit in a neat semicircle on a carved wooden bench, all playing with great earnestness and terrible coordination, cheeks puffed, brows furrowed; a small nightingale perches above on a birch branch, one wing raised like a conductor, expression pained but patient. Pale birch trunks, warm light.",
+
+    "the-swan-the-pike-and-the-crayfish": "A Russian riverbank with a loaded wooden cart; a white swan strains upward at a rope tied to the cart, wings beating; a crayfish grips the same rope and pulls backward toward the water, claws dug in; a pike pulls sideways toward the river, body bending; the cart sits perfectly still, wheels unmoved, and all three are sweating; a peasant in a belted linen shirt watches with his hands on his hips. Comic tension, bright day.",
+
+    "the-trumpeter": "A battlefield edge in soft haze in ancient Europe; a young soldier in a simple bronze breastplate over a wool tunic holds a brass trumpet, head bowed, shoulders slumped, cheeks flushed; opposite him an enemy officer in dark leather armour crosses his arms with a stern, unimpressed expression, one finger raised in accusation; broken spears in the grass behind. Muted colours, dusty light, no blood.",
+
+    "the-piglet-and-the-sheep": "A sheep pen in a European farmyard; a farmer in a coarse wool tunic and rope belt holds a squirming pink piglet under one arm, his face calm; the piglet's mouth is open in a loud squeal, legs kicking, eyes squeezed shut; around them several woolly sheep stand watching with mild, puzzled expressions, one chewing. Straw, wooden rails, morning light, comic contrast.",
+
+    "the-weasel-and-venus": "A warm room in a Roman house with a small table and a mousehole; a beautiful young woman in an elegant draped chiton sits gracefully on a cushion, but her posture is suddenly that of a hunter, one hand raised, eyes fixed and fierce, about to pounce; a tiny mouse darts past her feet; through the window, a white marble statue of a serene goddess covers her eyes. Soft interior light, mosaic floor, comic irony.",
+
+    "fairy-the-nightingle": "A Chinese imperial palace chamber at night, with red lacquered columns and carved lattice screens; a small brown nightingale perches on the carved sill, beak open in song, chest feathers fluttering; inside the room an emperor in a gold dragon-embroidered robe and a black gauze crown reclines on cushions, one hand pressed to his heart, a tear on his cheek; on a table nearby a jewelled mechanical bird sits silent and dull. Moonlight through paper lattice, warm lantern glow, emotional contrast.",
+
+    "fairy-fisherman-and-goldfish": "A stormy Russian seashore at dusk; an old fisherman in a patched coat and felt boots stands in a small wooden boat, one hand on the oar, shoulders slumped, expression weary and apologetic; before him a golden fish with bright eyes and a graceful tail rises from a swirl of dark water, mouth open as if speaking; a low log cabin with carved window frames on the shore behind him. Wind, spray, dramatic mood."
+  }
+}
