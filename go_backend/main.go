@@ -493,11 +493,79 @@ func imageExtension(name string) string {
 	return ""
 }
 
-func (s *server) resolveImageFile(storyID string) (string, os.FileInfo, bool) {
-	if strings.TrimSpace(s.imageDir) == "" || !isSafeSegment(storyID) {
+// storyImage 一张配图：位于 imageDir 的一级子目录中。
+// 只返回目录名与文件名，完整地址由前端用 apiUrl 拼，避免前缀与转义在多处重复处理。
+type storyImage struct {
+	Folder string `json:"folder"`
+	File   string `json:"file"`
+}
+
+// scanStoryImages 遍历图片目录的一级子目录，按故事 id 聚合。
+// 只认 <id>.jpg；目录名与文件名都要通过安全校验。
+func scanStoryImages(dir string) (map[string][]storyImage, int) {
+	index := make(map[string][]storyImage)
+	if strings.TrimSpace(dir) == "" {
+		return index, 0
+	}
+	folders, err := os.ReadDir(dir)
+	if err != nil {
+		return index, 0
+	}
+	total := 0
+	for _, folder := range folders {
+		if !folder.IsDir() {
+			continue
+		}
+		folderName := folder.Name()
+		if !isSafeSegment(folderName) {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(dir, folderName))
+		if err != nil {
+			continue
+		}
+		for _, entry := range files {
+			if entry.IsDir() {
+				continue
+			}
+			ext := imageExtension(entry.Name())
+			if ext == "" {
+				continue
+			}
+			storyID := strings.TrimSuffix(entry.Name(), ext)
+			if !isSafeSegment(storyID) {
+				continue
+			}
+			index[storyID] = append(index[storyID], storyImage{Folder: folderName, File: entry.Name()})
+			total++
+		}
+	}
+	// 目录名排序，保证同一故事的图片顺序稳定（客户端只依赖这个顺序）
+	for id := range index {
+		items := index[id]
+		sort.Slice(items, func(i, j int) bool {
+			return items[i].Folder < items[j].Folder
+		})
+	}
+	return index, total
+}
+
+func (s *server) storyImages(storyID string) []storyImage {
+	if !isSafeSegment(storyID) {
+		return nil
+	}
+	return s.imageIndex[storyID]
+}
+
+// imageFilePath 解析「子目录/文件名」，并确认没有跳出图片根目录。
+func (s *server) imageFilePath(folder, name string) (string, os.FileInfo, bool) {
+	if strings.TrimSpace(s.imageDir) == "" || !isSafeSegment(folder) || !isSafeSegment(name) {
 		return "", nil, false
 	}
-	filePath := filepath.Join(s.imageDir, storyID+".jpg")
+	if imageExtension(name) == "" {
+		return "", nil, false
+	}
+	filePath := filepath.Join(s.imageDir, folder, name)
 	if !isInsideDir(s.imageDir, filePath) {
 		return "", nil, false
 	}
@@ -508,8 +576,8 @@ func (s *server) resolveImageFile(storyID string) (string, os.FileInfo, bool) {
 	return "", nil, false
 }
 
-func (s *server) serveImage(w http.ResponseWriter, r *http.Request, storyID string) {
-	filePath, info, ok := s.resolveImageFile(storyID)
+func (s *server) serveImage(w http.ResponseWriter, r *http.Request, folder, name string) {
+	filePath, info, ok := s.imageFilePath(folder, name)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "image not found"})
 		return
@@ -527,33 +595,16 @@ func (s *server) serveImage(w http.ResponseWriter, r *http.Request, storyID stri
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
-// listImageIndex 返回已有配图的故事 id，用于覆盖率统计与预检。
+// listImageIndex 返回有配图的故事 id，用于覆盖率统计与预检。
 func (s *server) listImageIndex() []string {
-	ids := []string{}
-	if strings.TrimSpace(s.imageDir) == "" {
-		return ids
-	}
-	entries, err := os.ReadDir(s.imageDir)
-	if err != nil {
-		return ids
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		ext := imageExtension(name)
-		if ext == "" {
-			continue
-		}
-		base := strings.TrimSuffix(name, ext)
-		if isSafeSegment(base) {
-			ids = append(ids, base)
-		}
+	ids := make([]string, 0, len(s.imageIndex))
+	for id := range s.imageIndex {
+		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	return ids
 }
+
 
 // ---- http server ----
 
@@ -564,6 +615,11 @@ type server struct {
 	assets   fs.FS
 	audioDir string
 	imageDir string
+
+	// 启动时扫描一次：故事 id -> 一级子目录中的配图（按目录名排序）
+	imageIndex map[string][]storyImage
+	// 图片文件总数（同一故事可能有多张）
+	imageTotal int
 }
 
 func newServer(prefix string, st store, audioDir, imageDir string) (*server, error) {
@@ -575,13 +631,16 @@ func newServer(prefix string, st store, audioDir, imageDir string) (*server, err
 	if err != nil {
 		return nil, err
 	}
+	imageIndex, imageTotal := scanStoryImages(imageDir)
 	return &server{
-		prefix:   prefix,
-		store:    st,
-		index:    injectConfig(rawIndex, prefix),
-		assets:   assets,
-		audioDir: audioDir,
-		imageDir: imageDir,
+		prefix:     prefix,
+		store:      st,
+		index:      injectConfig(rawIndex, prefix),
+		assets:     assets,
+		audioDir:   audioDir,
+		imageDir:   imageDir,
+		imageIndex: imageIndex,
+		imageTotal: imageTotal,
 	}, nil
 }
 
@@ -702,23 +761,73 @@ func (s *server) serveAPI(w http.ResponseWriter, r *http.Request, rest string) {
 
 	if rest == "/api/images" && r.Method == http.MethodGet {
 		ids := s.listImageIndex()
-		writeJSON(w, http.StatusOK, map[string]any{"count": len(ids), "storyIds": ids})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"count":    len(ids),
+			"images":   s.imageTotal,
+			"storyIds": ids,
+		})
+		return
+	}
+
+	// 单个故事的全部配图：前端据此决定「无图 / 单图 / 轮播」。
+	if strings.HasPrefix(rest, "/api/story-images/") && r.Method == http.MethodGet {
+		storyID, err := urlPathUnescape(strings.TrimPrefix(rest, "/api/story-images/"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid story id"})
+			return
+		}
+		images := s.storyImages(storyID)
+		if images == nil {
+			images = []storyImage{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"storyId": storyID,
+			"count":   len(images),
+			"images":  images,
+		})
 		return
 	}
 
 	if strings.HasPrefix(rest, "/api/images/") && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 		tail := strings.TrimPrefix(rest, "/api/images/")
-		if strings.HasSuffix(strings.ToLower(tail), ".jpg") {
-			storyID, err := urlPathUnescape(tail[:len(tail)-len(".jpg")])
+		segments := strings.Split(tail, "/")
+		switch len(segments) {
+		case 1:
+			// 旧地址 /api/images/<id>.jpg：取该故事的第一张，保持向后兼容
+			name := segments[0]
+			if !strings.HasSuffix(strings.ToLower(name), ".jpg") {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+				return
+			}
+			storyID, err := urlPathUnescape(name[:len(name)-len(".jpg")])
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid story id"})
 				return
 			}
-			s.serveImage(w, r, storyID)
+			images := s.storyImages(storyID)
+			if len(images) == 0 {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "image not found"})
+				return
+			}
+			s.serveImage(w, r, images[0].Folder, images[0].File)
+			return
+		case 2:
+			folder, err := urlPathUnescape(segments[0])
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid folder"})
+				return
+			}
+			name, err := urlPathUnescape(segments[1])
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid image name"})
+				return
+			}
+			s.serveImage(w, r, folder, name)
+			return
+		default:
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
 	}
 
 	if rest == "/api/users" && r.Method == http.MethodPost {
@@ -1012,7 +1121,7 @@ const helpText = `小星星故事屋 · 单文件服务器
   --prefix <path>     URL 前缀，如 /story（默认 /，即根路径部署）
   --data-dir <path>   用户数据目录（默认空，仅存内存，进程退出即丢失）
   --audio-dir <path>  音色音频目录（默认 audio-voices；设为 - 表示关闭）
-  --image-dir <path>  故事配图目录（默认 story-images；设为 - 表示关闭）
+  --image-dir <path>  故事配图目录（默认 story-images；目录下一级子目录各放 <故事id>.jpg；设为 - 表示关闭）
   --version           显示版本号并退出
   -h, --help          显示本帮助并退出
 
@@ -1092,7 +1201,7 @@ func main() {
 		prefix = normalizePrefix(prompt(reader, "URL 前缀（如 /story，直接回车表示根路径 /）", "/"))
 		dataDir = strings.TrimSpace(prompt(reader, "用户数据存储目录（留空则仅存内存，退出即丢失）", ""))
 		audioDir = dirOrDisabled(prompt(reader, "音色音频目录（每个子文件夹一个音色；输入 - 表示不使用）", "audio-voices"))
-		imageDir = dirOrDisabled(prompt(reader, "故事配图目录（放 <故事id>.jpg；输入 - 表示不使用）", "story-images"))
+		imageDir = dirOrDisabled(prompt(reader, "故事配图目录（其一级子目录中放 <故事id>.jpg；输入 - 表示不使用）", "story-images"))
 	} else {
 		if provided["port"] {
 			if *portFlag < 1 || *portFlag > 65535 {
@@ -1142,7 +1251,7 @@ func main() {
 	if strings.TrimSpace(imageDir) == "" {
 		fmt.Println("故事配图: 已关闭（使用图标封面）")
 	} else {
-		fmt.Printf("故事配图: %s（%d 张）\n", imageDir, len(srv.listImageIndex()))
+		fmt.Printf("故事配图: %s（%d 张 / %d 个故事）\n", imageDir, srv.imageTotal, len(srv.listImageIndex()))
 	}
 	fmt.Println("按 Ctrl+C 停止服务")
 	fmt.Println("--------------------------------------------------")

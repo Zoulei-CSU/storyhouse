@@ -154,8 +154,10 @@ export function getUserRepository(force?: boolean): Promise<UserRepository>;
 | `GET` | `/api/voices` | 音色列表（遍历音频目录的子文件夹），无音频目录时返回空数组 |
 | `GET` | `/api/voices/:voice/index` | 该音色已存在音频的故事 id 列表 |
 | `GET` | `/api/voices/:voice/:id.mp3` | 返回音频，支持 `Range` 断点续播；缺文件返回 404 |
-| `GET` | `/api/images` | 已生成配图的故事 id 列表 `{ count, storyIds }` |
-| `GET/HEAD` | `/api/images/:id.jpg` | 返回配图；缺文件返回 404 |
+| `GET` | `/api/story-images/:id` | 该故事的全部配图 `{ storyId, count, images: [{ folder, file }] }`，按目录名排序 |
+| `GET` | `/api/images` | 有配图的故事 `{ count, images, storyIds }`（`images` 是文件总数） |
+| `GET/HEAD` | `/api/images/:folder/:file` | 返回指定子目录里的图片；缺文件返回 404 |
+| `GET/HEAD` | `/api/images/:id.jpg` | 旧地址兼容，返回该故事的第一张 |
 
 项目内置两种等价的后台实现，前端无需区分：
 
@@ -166,16 +168,23 @@ export function getUserRepository(force?: boolean): Promise<UserRepository>;
 
 ### imageRepository
 
-`src/services/imageRepository.ts`，故事配图的地址与缺失缓存。
+`src/services/imageRepository.ts`，故事配图的数据获取、地址与缓存。
 
 ```ts
-export function storyImageUrl(storyId: string): string; // /api/images/<id>.jpg
+export interface StoryImage { folder: string; file: string }
+export function storyImageLabel(image: StoryImage): string;  // 目录名/文件名
+export function storyImageUrl(image: StoryImage): string;    // /api/images/<folder>/<file>
+export function fetchStoryImages(storyId: string): Promise<StoryImage[]>;
 export function isKnownMissing(storyId: string): boolean;
 export function markMissing(storyId: string): void;
 ```
 
-- 缺失记录保存在模块级 `Set`，切页时不会重复请求同一张不存在的图
-- 是否发起请求由调用方先经 `detectStorageMode()` 判断，纯前端部署不会请求
+- 同一故事的并发请求合并成一次，成功后缓存在模块级 `Map`，来回切页不重复请求
+- 缺失记录保存在模块级 `Set`，切页时不会重复请求同一个没有配图的故事
+- 是否发起请求由 `fetchStoryImages` 内部先经 `detectStorageMode()` 判断，纯前端部署直接返回空数组
+- 网络异常**不**写入缺失记录，下次进入详情页仍会重试
+
+`src/hooks/useStoryImages.ts` 负责取列表并在空闲时上屏，返回 `StoryImage[]`。
 
 ### Go 单文件后台
 
@@ -345,8 +354,9 @@ function useStoryFilter(filter: StoryFilter): {
 | 组件 | 关键 Props | 说明 |
 |------|-----------|------|
 | `StoryCard` | `story: Story`, `onOpen?: (id) => void` | 列表卡片，展示封面、标题、寓意摘要、时长与收藏按钮 |
-| `StoryCover` | `story: Story`, `size?: 'sm' \| 'md' \| 'lg'`, `withImage?: boolean`, `onImageClick?: () => void` | 根据 `cover` 渲染插画/emoji/渐变背景；`withImage` 开启后空闲时加载真实配图并淡入覆盖；真实图加载完成后点击封面触发 `onImageClick` |
-| `StoryImageLightbox` | `open: boolean`, `src: string`, `alt: string`, `onClose: () => void` | 插画大图浏览弹层；portal 挂载到 body，支持 Esc、点击遮罩关闭，打开时锁定背景滚动并管理焦点 |
+| `StoryCover` | `story: Story`, `size?: 'sm' \| 'md' \| 'lg'`, `images?: StoryImage[]`, `onImageClick?: (index: number) => void` | 根据 `cover` 渲染图标/渐变底色；`images` 为空时保持图标，一张时显示单图，多张时自动渲染轮播。组件本身不发请求 |
+| `StoryImageCarousel` | `images: StoryImage[]`, `alt: string`, `onOpen: (index) => void` | 封面轮播：左右按钮、圆点（≤7 张）、`1 / n` 计数、手机横向滑动；点击当前图片触发 `onOpen` |
+| `StoryImageLightbox` | `open: boolean`, `images: StoryImage[]`, `index: number`, `onIndexChange: (index) => void`, `onClose: () => void` | 多图大图浏览；底部显示「目录名/文件名」，支持 Esc/方向键/遮罩/关闭按钮，打开时锁滚动并管理焦点 |
 | `StoryReader` | `story: Story`, `currentParagraph?: number` | 渲染分段正文并高亮当前朗读段 |
 | `SpeechBar` | `narration: UseNarrationResult`, `rate: number`, `onRateChange: (n) => void`, `voices: VoiceOption[]`, `source: NarrationSource`, `onSourceChange: (s) => void` | 朗读条：播放/暂停/停止、声音来源切换、TTS 下的语速控制 |
 | `SearchBar` | `value: string`, `onChange: (v) => void`, `placeholder?: string` | 受控搜索框，带防抖 |

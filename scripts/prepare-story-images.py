@@ -16,6 +16,9 @@
   # 显式映射（最稳）：{"文件名.png": "故事id"}
   python scripts/prepare-story-images.py --src .tmp-gen --map mapping.json
 
+  # 指定图片集（写入 story-images/<集名>/，后端按子目录分组）
+  python scripts/prepare-story-images.py --src .tmp-gen --ids ... --set 水彩
+
   # 只预览，不写文件
   python scripts/prepare-story-images.py --src .tmp-gen --ids ... --dry-run
 """
@@ -104,7 +107,12 @@ def resolve_pairs(files: list[Path], args) -> list[tuple[Path, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="裁切并转换故事配图")
     parser.add_argument("--src", required=True, help="生成图片所在目录")
-    parser.add_argument("--out", default=str(DEFAULT_OUT), help="输出目录，默认 story-images/")
+    parser.add_argument("--out", default=None, help="输出目录，默认 story-images/<集名>/")
+    parser.add_argument(
+        "--set",
+        default="default",
+        help="图片集名称，写入 story-images/<集名>/；后端按一级子目录分组，默认 default",
+    )
     parser.add_argument("--ids", help="按生成顺序逗号分隔的故事 id")
     parser.add_argument("--map", help="JSON 映射文件：{文件名: 故事id}")
     parser.add_argument("--width", type=int, default=1536, help="输出宽度，默认 1536")
@@ -121,7 +129,12 @@ def main() -> None:
     files = collect_sources(Path(args.src))
     pairs = resolve_pairs(files, args)
     known = load_known_ids()
-    out_dir = Path(args.out)
+
+    set_name = str(args.set).strip()
+    if not set_name or set_name in (".", "..") or any(ch in set_name for ch in ("/", "\\")):
+        fail("--set 只是子目录名，不能为空、不能包含路径分隔符")
+
+    out_dir = Path(args.out) if args.out else DEFAULT_OUT / set_name
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
 

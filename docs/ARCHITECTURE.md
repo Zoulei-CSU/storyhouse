@@ -123,7 +123,8 @@ story-house/
 │   └── <音色名>/                  # 每个子文件夹一个音色，内放 <故事id>.mp3
 ├── story-images/                 # 故事配图根目录（图片已 gitignore）
 │   ├── .gitkeep                  # 占位，保留空目录
-│   └── <故事id>.jpg               # 每篇故事一张插画
+│   └── <图片集>/                  # 一级子目录 = 一套图，内放 <故事id>.jpg
+│       └── <故事id>.jpg           # 同一故事在不同子目录可各有一张
 ├── docs/
 │   ├── INDEX.md                  # 文档导航总览
 │   ├── AUDIO_VOICES.md           # 音色音频目录的约定与生成流程
@@ -148,7 +149,7 @@ story-house/
 - **状态层 `store/`**: `authStore` 管理登录与个人资料并同步收藏/历史；`favoritesStore` 管理收藏集合与最近阅读；`preferencesStore` 管理年龄段、字号、语速。均通过 `persist` 落地。
 - **朗读逻辑 `useNarration`**: 统一朗读入口，按 `narrationSource` 在浏览器 TTS（委托 `useSpeech`）与服务端音色音频（`HTMLAudioElement`）之间切换，对 UI 暴露单一接口。`useSpeech` 保留为 TTS 模式的底层实现。
 - **音色服务 `voiceRepository`**: 探测后端音色列表与某音色已生成音频的故事 id 集合，结果缓存；仅在存储模式为 `server` 时请求，纯前端返回空列表。
-- **配图服务 `imageRepository`**: 拼装 `/api/images/<故事id>.jpg` 地址，并在模块级记录已确认缺失的故事 id，避免切页时重复 404。
+- **配图服务 `imageRepository`**: 取 `/api/story-images/<故事id>` 拿到该故事在各级子目录中的图片，拼装 `/api/images/<目录>/<文件名>` 地址；同一故事的并发请求合并、结果缓存，并在模块级记录已确认缺失的故事 id，避免切页时重复请求。
 - **筛选逻辑 `useStoryFilter`**: 接收年龄段、分类、关键词，输出过滤排序后的故事列表，是首页与探索页共用的核心逻辑。
 - **视图层**: `StoryCard` 负责列表项，`StoryReader` 负责正文分段渲染与朗读联动，`SpeechBar` 负责播放控制；`LoginPage`/`ProfilePage` 负责账号相关界面。
 

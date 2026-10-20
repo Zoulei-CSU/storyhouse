@@ -1,7 +1,8 @@
 /**
  * 统计故事配图的生成进度。
  *
- * 扫描图片目录里存在的 <storyId>.jpg，对照提示词清单统计覆盖率。
+ * 后端只读取图片目录的一级子目录，所以这里也按子目录扫描：
+ * 每个子目录是一套图，同一故事可以在多套里各有一张。
  *
  * 用法：
  *   node scripts/image-status.mjs               # 默认扫描 story-images/
@@ -43,20 +44,39 @@ async function main() {
     process.exit(1);
   }
 
-  let files = [];
+  let sets = [];
   try {
-    files = await fs.readdir(imageDir);
+    const entries = await fs.readdir(imageDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      let names = [];
+      try {
+        names = await fs.readdir(path.join(imageDir, entry.name));
+      } catch {
+        continue;
+      }
+      const ids = names
+        .filter((name) => /\.jpe?g$/i.test(name))
+        .map((name) => name.replace(/\.jpe?g$/i, ''));
+      sets.push({ name: entry.name, ids });
+    }
   } catch {
     console.log(`图片目录不存在：${imageDir}`);
     console.log('（还没有生成任何图片，或目录尚未创建）');
-    files = [];
   }
+  sets.sort((a, b) => a.name.localeCompare(b.name));
 
-  const existing = new Set(
-    files
-      .filter((name) => /\.jpe?g$/i.test(name))
-      .map((name) => name.replace(/\.jpe?g$/i, '')),
-  );
+  // 同一故事可能出现在多个子目录里，覆盖率按「去重后的故事」算
+  const existing = new Set();
+  const appearances = new Map();
+  let totalImages = 0;
+  for (const set of sets) {
+    for (const id of set.ids) {
+      existing.add(id);
+      appearances.set(id, (appearances.get(id) ?? 0) + 1);
+      totalImages += 1;
+    }
+  }
 
   const stories = manifest.stories ?? [];
   const stats = new Map();
@@ -79,7 +99,11 @@ async function main() {
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
 
   console.log(`图片目录：${imageDir}`);
-  console.log(`总进度：${done}/${total}（${percent}%）`);
+  if (sets.length > 0) {
+    const summary = sets.map((set) => `${set.name}（${set.ids.length} 张）`).join('、');
+    console.log(`子目录：${summary}`);
+  }
+  console.log(`总进度：${done}/${total}（${percent}%），共 ${totalImages} 张图`);
   console.log('');
   console.log('分类          已完成 / 总数');
   console.log('-------------------------');
@@ -97,9 +121,28 @@ async function main() {
     console.log(`${label.padEnd(8)} ${String(entry.done).padStart(3)} / ${String(entry.total).padStart(3)}  ${String(bar).padStart(3)}%`);
   }
 
+  const multi = [...appearances.values()].filter((count) => count > 1).length;
+  if (multi > 0) {
+    console.log('');
+    console.log(`其中 ${multi} 个故事有多张配图（来自不同子目录）`);
+  }
+
   if (unknownCount > 0) {
     console.log('');
     console.log(`另有 ${unknownCount} 个文件名不在故事清单里（可能是拼写错误或多出来的图片）`);
+  }
+
+  if (sets.length === 0) {
+    try {
+      const flat = (await fs.readdir(imageDir)).filter((name) => /\.jpe?g$/i.test(name));
+      if (flat.length > 0) {
+        console.log('');
+        console.log(`提示：目录里有 ${flat.length} 张平铺的图片，但后端只读取一级子目录。`);
+        console.log('请把它们移到某个子目录里，例如：story-images/default/');
+      }
+    } catch {
+      // 忽略
+    }
   }
 
   if (missing.length > 0) {

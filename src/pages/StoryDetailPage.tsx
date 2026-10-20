@@ -8,7 +8,7 @@ import { StoryMeta } from '@/components/story/StoryMeta';
 import { StoryReader } from '@/components/story/StoryReader';
 import { allStories, getStory } from '@/data/stories';
 import { useNarration } from '@/hooks/useNarration';
-import { storyImageUrl } from '@/services/imageRepository';
+import { useStoryImages } from '@/hooks/useStoryImages';
 import { audioUrl, fetchVoices, getVoiceIndex } from '@/services/voiceRepository';
 import { useFavoritesStore } from '@/store/favoritesStore';
 import { usePreferencesStore, type FontSize } from '@/store/preferencesStore';
@@ -42,8 +42,15 @@ export function StoryDetailPage() {
   const [voicesReady, setVoicesReady] = useState(false);
   const [voiceIndex, setVoiceIndex] = useState<Set<string>>(() => new Set());
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   // 保持引用稳定：灯箱的 Esc/焦点副作用依赖 onClose，回调每次新建会反复重建监听
   const closeLightbox = useCallback(() => setLightboxOpen(false), []);
+  const openLightbox = useCallback((index: number) => {
+    setLightboxIndex(index);
+    setLightboxOpen(true);
+  }, []);
+  // 没有后端时返回空数组，封面回落到图标 + 渐变
+  const storyImages = useStoryImages(story?.id ?? '');
 
   const paragraphs = story?.paragraphs ?? EMPTY_PARAGRAPHS;
   const storyId = story?.id ?? '';
@@ -134,7 +141,12 @@ export function StoryDetailPage() {
       </button>
 
       <header className="toy-card flex flex-col gap-4 p-4 sm:p-6">
-        <StoryCover story={story} size="lg" withImage onImageClick={() => setLightboxOpen(true)} />
+        <StoryCover
+          story={story}
+          size="lg"
+          images={storyImages}
+          onImageClick={openLightbox}
+        />
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-extrabold text-ink-strong sm:text-3xl">{story.title}</h1>
@@ -218,8 +230,9 @@ export function StoryDetailPage() {
 
       <StoryImageLightbox
         open={lightboxOpen}
-        src={storyImageUrl(story.id)}
-        alt={`《${story.title}》的插画`}
+        images={storyImages}
+        index={lightboxIndex}
+        onIndexChange={setLightboxIndex}
         onClose={closeLightbox}
       />
     </main>

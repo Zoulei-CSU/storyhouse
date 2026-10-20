@@ -239,23 +239,54 @@ function isInsideImageDir(target) {
   return resolved === base || resolved.startsWith(base + path.sep);
 }
 
-async function listImageIndex() {
-  let entries;
+/**
+ * 遍历图片目录的一级子目录，按故事 id 聚合。
+ * 开发环境每次请求都扫一遍（几百个文件，开销可忽略），
+ * 这样新放进去的图片不必重启服务。
+ */
+async function scanStoryImages() {
+  const index = new Map();
+  let total = 0;
+  let folders;
   try {
-    entries = await fs.readdir(IMAGE_DIR, { withFileTypes: true });
+    folders = await fs.readdir(IMAGE_DIR, { withFileTypes: true });
   } catch {
-    return [];
+    return { index, total };
   }
-  return entries
-    .filter((entry) => entry.isFile() && /\.jpe?g$/i.test(entry.name))
-    .map((entry) => entry.name.replace(/\.jpe?g$/i, ''))
-    .filter((id) => isSafeSegment(id))
-    .sort();
+  for (const folder of folders) {
+    if (!folder.isDirectory() || !isSafeSegment(folder.name)) continue;
+    let files;
+    try {
+      files = await fs.readdir(path.join(IMAGE_DIR, folder.name), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.isFile() || !/\.jpe?g$/i.test(file.name)) continue;
+      const storyId = file.name.replace(/\.jpe?g$/i, '');
+      if (!isSafeSegment(storyId)) continue;
+      const items = index.get(storyId) ?? [];
+      items.push({ folder: folder.name, file: file.name });
+      index.set(storyId, items);
+      total += 1;
+    }
+  }
+  // 目录名排序，保证同一故事的图片顺序稳定。
+  // 用码位比较而不是 localeCompare：Go 那边是字节序，两者要一致。
+  for (const items of index.values()) {
+    items.sort((a, b) => (a.folder < b.folder ? -1 : a.folder > b.folder ? 1 : 0));
+  }
+  return { index, total };
 }
 
-async function resolveImageFile(storyId) {
-  if (!isSafeSegment(storyId)) return null;
-  const file = path.join(IMAGE_DIR, `${storyId}.jpg`);
+async function listImageIndex() {
+  const { index } = await scanStoryImages();
+  return [...index.keys()].sort();
+}
+
+async function resolveImageFile(folder, name) {
+  if (!isSafeSegment(folder) || !isSafeSegment(name) || !/\.jpe?g$/i.test(name)) return null;
+  const file = path.join(IMAGE_DIR, folder, name);
   if (!isInsideImageDir(file)) return null;
   try {
     const stat = await fs.stat(file);
@@ -266,8 +297,8 @@ async function resolveImageFile(storyId) {
   return null;
 }
 
-async function serveImage(req, res, storyId) {
-  const resolved = await resolveImageFile(storyId);
+async function serveImage(req, res, folder, name) {
+  const resolved = await resolveImageFile(folder, name);
   if (!resolved) {
     sendJson(res, 404, { error: 'image not found' });
     return;
@@ -414,16 +445,37 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/api/images') {
-      const storyIds = await listImageIndex();
-      sendJson(res, 200, { count: storyIds.length, storyIds });
+      const { index, total } = await scanStoryImages();
+      const storyIds = [...index.keys()].sort();
+      sendJson(res, 200, { count: storyIds.length, images: total, storyIds });
+      return;
+    }
+
+    // 单个故事的全部配图：前端据此决定「无图 / 单图 / 轮播」
+    if (req.method === 'GET' && pathname.startsWith('/api/story-images/')) {
+      const storyId = decodeURIComponent(pathname.slice('/api/story-images/'.length));
+      const { index } = await scanStoryImages();
+      const images = index.get(storyId) ?? [];
+      sendJson(res, 200, { storyId, count: images.length, images });
       return;
     }
 
     if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/api/images/')) {
-      const tail = pathname.slice('/api/images/'.length);
-      if (tail.toLowerCase().endsWith('.jpg')) {
-        const storyId = decodeURIComponent(tail.slice(0, -'.jpg'.length));
-        await serveImage(req, res, storyId);
+      const segments = pathname.slice('/api/images/'.length).split('/');
+      // 旧地址 /api/images/<id>.jpg：取该故事的第一张
+      if (segments.length === 1 && segments[0].toLowerCase().endsWith('.jpg')) {
+        const storyId = decodeURIComponent(segments[0].slice(0, -'.jpg'.length));
+        const { index } = await scanStoryImages();
+        const images = index.get(storyId) ?? [];
+        if (images.length === 0) {
+          sendJson(res, 404, { error: 'image not found' });
+          return;
+        }
+        await serveImage(req, res, images[0].folder, images[0].file);
+        return;
+      }
+      if (segments.length === 2) {
+        await serveImage(req, res, decodeURIComponent(segments[0]), decodeURIComponent(segments[1]));
         return;
       }
       sendJson(res, 404, { error: 'not found' });
@@ -472,9 +524,10 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
+server.listen(PORT, HOST, async () => {
   console.log(`[story-house] API server listening on http://${HOST}:${PORT}`);
   console.log(`[story-house] user data directory: ${DATA_DIR}`);
   console.log(`[story-house] audio voices directory: ${AUDIO_DIR}`);
-  console.log(`[story-house] story images directory: ${IMAGE_DIR}`);
+  const { index, total } = await scanStoryImages();
+  console.log(`[story-house] story images directory: ${IMAGE_DIR} (${total} 张 / ${index.size} 个故事)`);
 });
