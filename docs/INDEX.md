@@ -70,5 +70,6 @@
 - [Go 后台编译与部署](../go_backend/docs/GO_BACKEND_BUILD_DEPLOY.md) - 最小体积编译、交叉编译矩阵、直接/nohup/systemd 部署
 - [音色音频目录说明](./AUDIO_VOICES.md) - 音频文件夹的命名约定、生成步骤与行为（音频文件本身不入库）
 - [故事配图设计](./specs/2026-10-17-story-images/design.md) - 配图规格、后端接口、前端渐进加载与提示词体系
+- [连续朗读设计](./specs/2026-10-20-auto-next-narration/design.md) - 读完自动进入下一篇：结束判定、缺音频跳过、跨路由自动播放与开关
 - [故事配图目录说明](./STORY_IMAGES.md) - 图片命名、生成流程与后端配置（图片文件本身不入库）
 - [配图生成任务包](./image-handover/README.md) - 交给其他 AI 生图的自包含资料：规格、分类规则、361 条提示词与 CSV

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { SpeechBar } from '@/components/audio/SpeechBar';
 import { Button } from '@/components/common/Button';
@@ -11,6 +11,7 @@ import { useNarration } from '@/hooks/useNarration';
 import { useStoryImages } from '@/hooks/useStoryImages';
 import { audioUrl, fetchVoices, getVoiceIndex } from '@/services/voiceRepository';
 import { useFavoritesStore } from '@/store/favoritesStore';
+import { usePlaybackStore } from '@/store/playbackStore';
 import { usePreferencesStore, type FontSize } from '@/store/preferencesStore';
 import type { NarrationSource, VoiceOption } from '@/types/voice';
 
@@ -37,6 +38,18 @@ export function StoryDetailPage() {
   const setSpeechRate = usePreferencesStore((state) => state.setSpeechRate);
   const narrationSource = usePreferencesStore((state) => state.narrationSource);
   const setNarrationSource = usePreferencesStore((state) => state.setNarrationSource);
+  const continuousPlay = usePreferencesStore((state) => state.continuousPlay);
+  const setContinuousPlay = usePreferencesStore((state) => state.setContinuousPlay);
+
+  // 连续播放：读完 3 秒后跳到下一篇
+  const [voiceIndexReady, setVoiceIndexReady] = useState(false);
+  const [upcoming, setUpcoming] = useState<{ id: string; title: string } | null>(null);
+  const [advanceSeconds, setAdvanceSeconds] = useState(0);
+  const [advanceNotice, setAdvanceNotice] = useState<string | null>(null);
+  const autoPlayId = usePlaybackStore((state) => state.autoPlayId);
+  const requestAutoPlay = usePlaybackStore((state) => state.requestAutoPlay);
+  const clearAutoPlay = usePlaybackStore((state) => state.clearAutoPlay);
+
   const [voices, setVoices] = useState<VoiceOption[]>([]);
   // 音色列表是否已探测完成。避免在列表尚未返回时把用户已保存的音色误判为失效。
   const [voicesReady, setVoicesReady] = useState(false);
@@ -60,6 +73,34 @@ export function StoryDetailPage() {
   const hasVoice = selectedVoiceId ? voiceIndex.has(storyId) : false;
   const audioSrc = selectedVoiceId && storyId ? audioUrl(selectedVoiceId, storyId) : undefined;
 
+  // 音色模式下「下一篇」必须是真有音频的那篇：用已加载的索引跳过缺音频的篇目。
+  // 浏览器朗读没有音频依赖，直接取下一篇。
+  const findNextPlayable = useCallback(
+    (fromId: string, kind: NarrationSource['kind'], available: Set<string>) => {
+      const start = allStories.findIndex((item) => item.id === fromId);
+      if (start < 0) return null;
+      for (let i = start + 1; i < allStories.length; i += 1) {
+        const candidate = allStories[i];
+        if (kind === 'voice' && !available.has(candidate.id)) continue;
+        return candidate;
+      }
+      return null;
+    },
+    [],
+  );
+
+  const handleNarrationEnd = useCallback(() => {
+    if (!continuousPlay) return;
+    const target = findNextPlayable(storyId, source.kind, voiceIndex);
+    if (!target) {
+      setAdvanceNotice('已经是最后一篇啦');
+      return;
+    }
+    setAdvanceNotice(null);
+    setUpcoming({ id: target.id, title: target.title });
+    setAdvanceSeconds(3);
+  }, [continuousPlay, findNextPlayable, storyId, source.kind, voiceIndex]);
+
   const narration = useNarration({
     storyId,
     paragraphs,
@@ -67,7 +108,12 @@ export function StoryDetailPage() {
     source,
     hasVoice,
     audioSrc,
+    onEnd: handleNarrationEnd,
   });
+
+  // 自动开始朗读用 ref 取最新的 play，避免把整个 narration 放进 effect 依赖
+  const playRef = useRef(narration.play);
+  playRef.current = narration.play;
 
   useEffect(() => {
     let cancelled = false;
@@ -93,11 +139,16 @@ export function StoryDetailPage() {
   useEffect(() => {
     if (!selectedVoiceId) {
       setVoiceIndex(new Set());
+      setVoiceIndexReady(true);
       return;
     }
+    // 新音色的索引还没回来之前不能自动播放：此时 hasVoice 一定是 false，会误报缺音频
+    setVoiceIndexReady(false);
     let cancelled = false;
     getVoiceIndex(selectedVoiceId).then((ids) => {
-      if (!cancelled) setVoiceIndex(ids);
+      if (cancelled) return;
+      setVoiceIndex(ids);
+      setVoiceIndexReady(true);
     });
     return () => {
       cancelled = true;
@@ -108,8 +159,64 @@ export function StoryDetailPage() {
     if (story) markAsRead(story.id);
     // 切换到别的故事时，若大图还开着，先关掉
     setLightboxOpen(false);
+    setUpcoming(null);
+    setAdvanceNotice(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [story, markAsRead]);
+
+  // 3 秒倒计时：到点后跳转，并在落地页请求自动开始朗读
+  useEffect(() => {
+    if (!upcoming) return;
+    if (advanceSeconds > 0) {
+      const timer = window.setTimeout(() => setAdvanceSeconds((value) => value - 1), 1000);
+      return () => window.clearTimeout(timer);
+    }
+    const targetId = upcoming.id;
+    setUpcoming(null);
+    requestAutoPlay(targetId);
+    navigate(`/story/${targetId}`);
+  }, [upcoming, advanceSeconds, navigate, requestAutoPlay]);
+
+  // 落地页：等音色索引就绪后再自动播放，否则 hasVoice 还是 false
+  useEffect(() => {
+    if (autoPlayId !== storyId) return;
+    if (source.kind === 'voice' && !voiceIndexReady) return;
+    clearAutoPlay();
+    if (source.kind === 'voice' && !voiceIndex.has(storyId)) return;
+    playRef.current(0);
+  }, [autoPlayId, storyId, source.kind, voiceIndexReady, voiceIndex, clearAutoPlay]);
+
+  // 自动播放信号只对一次跳转有效：离开本页时若还没消费就清掉，
+  // 避免以后手动回到这篇时突然自己念起来
+  useEffect(
+    () => () => {
+      const state = usePlaybackStore.getState();
+      if (state.autoPlayId === storyId) state.clearAutoPlay();
+    },
+    [storyId],
+  );
+
+  // 用户重新播放或换了声音来源，就取消待跳转
+  useEffect(() => {
+    if (narration.isSpeaking) setUpcoming(null);
+  }, [narration.isSpeaking]);
+
+  useEffect(() => {
+    setUpcoming(null);
+    setAdvanceNotice(null);
+  }, [source]);
+
+  // 关掉开关时立即取消待跳转
+  useEffect(() => {
+    if (!continuousPlay) setUpcoming(null);
+  }, [continuousPlay]);
+
+  // 「已经是最后一篇」这类提示过几秒自动淡出
+  useEffect(() => {
+    if (!advanceNotice) return;
+    const timer = window.setTimeout(() => setAdvanceNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [advanceNotice]);
 
   if (!story) {
     return (
@@ -173,8 +280,19 @@ export function StoryDetailPage() {
           voices={voices}
           source={source}
           onSourceChange={setNarrationSource}
+          continuous={continuousPlay}
+          onContinuousChange={setContinuousPlay}
         />
       </div>
+
+      {(upcoming || advanceNotice) && (
+        <p
+          role="status"
+          className="mt-3 rounded-2xl bg-brand-soft px-4 py-2 text-sm font-bold text-brand"
+        >
+          {upcoming ? `${advanceSeconds} 秒后播放《${upcoming.title}》` : advanceNotice}
+        </p>
+      )}
 
       <div className="mt-4 flex items-center gap-2">
         <span className="text-sm font-bold text-ink-muted">字号</span>

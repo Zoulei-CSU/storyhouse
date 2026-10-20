@@ -4,6 +4,11 @@ interface UseSpeechOptions {
   paragraphs: string[];
   rate?: number;
   lang?: string;
+  /**
+   * 自然读完最后一个段落时触发。
+   * stop / pause / 切换文本都不会触发，调用方可据此判断「真的读完了」。
+   */
+  onEnd?: () => void;
 }
 
 /** 朗读文本的稳定标识：内容变化时才需要中断当前朗读。 */
@@ -40,7 +45,7 @@ function pickChineseVoice(lang: string): SpeechSynthesisVoice | null {
  * 注意 `play` 通过 ref 读取**最新的** `paragraphs`：切换故事后
  * `play` 一定念当前故事，而不是闭包里捕获的上一个故事。
  */
-export function useSpeech({ paragraphs, rate = 1, lang = 'zh-CN' }: UseSpeechOptions): UseSpeechResult {
+export function useSpeech({ paragraphs, rate = 1, lang = 'zh-CN', onEnd }: UseSpeechOptions): UseSpeechResult {
   const [isSupported] = useState(
     () => typeof window !== 'undefined' && 'speechSynthesis' in window,
   );
@@ -49,6 +54,10 @@ export function useSpeech({ paragraphs, rate = 1, lang = 'zh-CN' }: UseSpeechOpt
   const [currentIndex, setCurrentIndex] = useState(-1);
   const indexRef = useRef(-1);
   const cancelledRef = useRef(false);
+
+  // 用 ref 保存最新回调，避免父组件每次渲染都重建 play 的依赖
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
 
   // 始终保留最新的朗读文本。切歌时若 play 仍读到闭包里捕获的旧 paragraphs，
   // 会先念上一个故事的内容，因此这里统一从 ref 取「当前」文本。
@@ -85,6 +94,8 @@ export function useSpeech({ paragraphs, rate = 1, lang = 'zh-CN' }: UseSpeechOpt
           setCurrentIndex(-1);
           setIsSpeaking(false);
           setIsPaused(false);
+          // 先置 cancelled，保证这里只走一次；stop() 也会置 cancelled，故不会误触发
+          onEndRef.current?.();
           return;
         }
         const utterance = new SpeechSynthesisUtterance(current[index]);

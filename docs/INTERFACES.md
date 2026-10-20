@@ -270,14 +270,36 @@ interface PreferencesState {
   ageGroup: AgeGroup;
   fontSize: 'base' | 'large' | 'xlarge';
   speechRate: number;
-  speechEnabled: boolean;
+  theme: ThemeId;
+  narrationSource: NarrationSource;
+  /** 读完自动进入下一篇；默认 false */
+  continuousPlay: boolean;
   setAgeGroup: (age: AgeGroup) => void;
   setFontSize: (size: PreferencesState['fontSize']) => void;
   setSpeechRate: (rate: number) => void;
+  setTheme: (theme: ThemeId) => void;
+  setNarrationSource: (source: NarrationSource) => void;
+  setContinuousPlay: (enabled: boolean) => void;
 }
 ```
 
-两个 store 均通过 `persist` 中间件持久化到 `localStorage`，key 分别为 `story-house:favorites` 与 `story-house:preferences`。
+### playbackStore
+
+`src/store/playbackStore.ts`，**不持久化**，只用于「连续播放」跳转瞬间的表面信号：
+
+```ts
+interface PlaybackState {
+  autoPlayId: string | null;                     // 需要自动开始朗读的故事 id
+  requestAutoPlay: (storyId: string) => void;
+  clearAutoPlay: () => void;
+}
+```
+
+- 上一页写入，落地页消费后立刻清空
+- 刻意不放进 URL：刷新或前进后退不应该突然自动播放
+- 离开详情页时若仍未消费，会被清理，避免以后手动回到该篇时自动念起来
+
+两个持久化 store 通过 `persist` 中间件写入 `localStorage`，key 分别为 `story-house:favorites` 与 `story-house:preferences`。
 
 ## Hook 接口
 
@@ -288,6 +310,8 @@ interface UseSpeechOptions {
   paragraphs: string[];
   rate?: number;
   lang?: string;
+  /** 自然读完最后一个段落时触发；stop/pause/切文本都不触发 */
+  onEnd?: () => void;
 }
 
 interface UseSpeechResult {
@@ -322,6 +346,8 @@ interface UseNarrationOptions {
   source: NarrationSource;
   hasVoice: boolean;
   audioSrc?: string;
+  /** 自然读完时触发（音色走 audio.onended，TTS 走段落读完）；stop/pause 不触发 */
+  onEnd?: () => void;
 }
 ```
 
@@ -358,7 +384,7 @@ function useStoryFilter(filter: StoryFilter): {
 | `StoryImageCarousel` | `images: StoryImage[]`, `alt: string`, `onOpen: (index) => void` | 封面轮播：左右按钮、圆点（≤7 张）、`1 / n` 计数、手机横向滑动；点击当前图片触发 `onOpen` |
 | `StoryImageLightbox` | `open: boolean`, `images: StoryImage[]`, `index: number`, `onIndexChange: (index) => void`, `onClose: () => void` | 多图大图浏览；底部显示「目录名/文件名」，支持 Esc/方向键/遮罩/关闭按钮，打开时锁滚动并管理焦点 |
 | `StoryReader` | `story: Story`, `currentParagraph?: number` | 渲染分段正文并高亮当前朗读段 |
-| `SpeechBar` | `narration: UseNarrationResult`, `rate: number`, `onRateChange: (n) => void`, `voices: VoiceOption[]`, `source: NarrationSource`, `onSourceChange: (s) => void` | 朗读条：播放/暂停/停止、声音来源切换、TTS 下的语速控制 |
+| `SpeechBar` | `narration: UseNarrationResult`, `rate: number`, `onRateChange: (n) => void`, `voices: VoiceOption[]`, `source: NarrationSource`, `onSourceChange: (s) => void`, `continuous: boolean`, `onContinuousChange: (v) => void` | 朗读条：播放/暂停/停止、声音来源切换、连续播放开关、TTS 下的语速控制 |
 | `SearchBar` | `value: string`, `onChange: (v) => void`, `placeholder?: string` | 受控搜索框，带防抖 |
 | `AgeSwitcher` | `value: AgeGroup`, `onChange: (v) => void` | 年龄段切换，大按钮、高对比 |
 | `Chip` | `label: string`, `active?: boolean`, `onClick?: () => void` | 分类/标签筛选标签 |

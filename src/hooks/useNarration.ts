@@ -12,6 +12,11 @@ interface UseNarrationOptions {
   hasVoice: boolean;
   /** 音频播放地址；没有时传入 undefined。 */
   audioSrc?: string;
+  /**
+   * 自然朗读结束时触发（音色与 TTS 都算）。
+   * 用户停止、暂停、切换故事都不会触发。
+   */
+  onEnd?: () => void;
 }
 
 export interface UseNarrationResult {
@@ -42,10 +47,15 @@ export function useNarration({
   source,
   hasVoice,
   audioSrc,
+  onEnd,
 }: UseNarrationOptions): UseNarrationResult {
-  const tts = useSpeech({ paragraphs, rate, lang });
+  const tts = useSpeech({ paragraphs, rate, lang, onEnd: source.kind === 'voice' ? undefined : onEnd });
   const voiceMode = source.kind === 'voice';
   const voiceId = source.kind === 'voice' ? source.voiceId : '';
+
+  // 用 ref 保存，避免把 onEnd 塞进 play 的依赖里导致音频被重建
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
 
   const [voiceSpeaking, setVoiceSpeaking] = useState(false);
   const [voicePaused, setVoicePaused] = useState(false);
@@ -98,6 +108,8 @@ export function useNarration({
           setVoiceSpeaking(false);
           setVoicePaused(false);
           if (audio) audio.currentTime = 0;
+          // 只有自然播完才会走到这里；teardown / pause 不会触发 onended
+          onEndRef.current?.();
         };
         audio.onerror = () => {
           setVoiceSpeaking(false);

@@ -9,9 +9,21 @@ interface SpeechBarProps {
   voices: VoiceOption[];
   source: NarrationSource;
   onSourceChange: (source: NarrationSource) => void;
+  /** 读完是否自动进入下一篇 */
+  continuous: boolean;
+  onContinuousChange: (enabled: boolean) => void;
 }
 
-export function SpeechBar({ narration, rate, onRateChange, voices, source, onSourceChange }: SpeechBarProps) {
+export function SpeechBar({
+  narration,
+  rate,
+  onRateChange,
+  voices,
+  source,
+  onSourceChange,
+  continuous,
+  onContinuousChange,
+}: SpeechBarProps) {
   const canChooseVoice = voices.length > 0;
   const selected = source.kind === 'voice' ? source.voiceId : 'tts';
 
@@ -71,22 +83,34 @@ export function SpeechBar({ narration, rate, onRateChange, voices, source, onSou
             停止
           </Button>
 
-          {narration.mode === 'tts' && (
-            <label className="ml-auto flex items-center gap-2 text-sm font-bold text-ink-muted">
-              语速
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm font-bold text-ink-muted">
               <input
-                type="range"
-                min={0.6}
-                max={1.4}
-                step={0.1}
-                value={rate}
-                onChange={(event) => onRateChange(Number(event.target.value))}
-                className="h-2 w-28 cursor-pointer accent-brand"
-                aria-label="朗读语速"
+                type="checkbox"
+                checked={continuous}
+                onChange={(event) => onContinuousChange(event.target.checked)}
+                className="h-4 w-4 cursor-pointer accent-brand"
               />
-              <span className="w-8 text-right">{rate.toFixed(1)}</span>
+              连续播放
             </label>
-          )}
+
+            {narration.mode === 'tts' && (
+              <label className="flex items-center gap-2 text-sm font-bold text-ink-muted">
+                语速
+                <input
+                  type="range"
+                  min={0.6}
+                  max={1.4}
+                  step={0.1}
+                  value={rate}
+                  onChange={(event) => onRateChange(Number(event.target.value))}
+                  className="h-2 w-28 cursor-pointer accent-brand"
+                  aria-label="朗读语速"
+                />
+                <span className="w-8 text-right">{rate.toFixed(1)}</span>
+              </label>
+            )}
+          </div>
         </div>
       ) : (
         <p className="text-sm text-ink-muted">你的浏览器暂不支持自动朗读，可以自己读一读哦。</p>
