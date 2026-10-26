@@ -116,6 +116,12 @@ export function SpeechBar({
         <p className="text-sm text-ink-muted">你的浏览器暂不支持自动朗读，可以自己读一读哦。</p>
       )}
 
+      {narration.needsGesture && (
+        <p className="mt-3 text-sm text-ink-muted" role="status">
+          手机浏览器需要一次点击才能出声，点一下页面就继续播放。
+        </p>
+      )}
+
       {narration.error && (
         <p className="mt-3 text-sm font-bold text-rose-600" role="alert">
           {narration.error}

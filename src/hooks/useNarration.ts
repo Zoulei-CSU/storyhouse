@@ -30,6 +30,8 @@ export interface UseNarrationResult {
   stop: () => void;
   mode: 'tts' | 'voice';
   error: string | null;
+  /** 被浏览器自动播放策略拦下，等用户点一下页面即可续播。 */
+  needsGesture: boolean;
 }
 
 /**
@@ -60,7 +62,13 @@ export function useNarration({
   const [voiceSpeaking, setVoiceSpeaking] = useState(false);
   const [voicePaused, setVoicePaused] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [needsGesture, setNeedsGesture] = useState(false);
+
+  // 整个会话复用同一个 audio 元素，只换 src。
+  // 手机浏览器（尤其 iOS，所有浏览器都是 WebKit）只允许被用户手势解锁过的元素程序化播放；
+  // 每次切故事新建元素会退回未解锁状态，自动续播必被拒，而手动点击又正常。
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentSrcRef = useRef<string | null>(null);
 
   // 播放尝试的代号：teardown 或新一轮播放都会 +1，
   // 用来丢弃过期的失败回调与重试定时器，避免旧请求把新播放误判为失败。
@@ -79,20 +87,43 @@ export function useNarration({
     clearRetryTimer();
     const audio = audioRef.current;
     if (audio) {
-      audio.onended = null;
-      audio.onerror = null;
       audio.pause();
-      audioRef.current = null;
+      audio.currentTime = 0;
     }
     setVoiceSpeaking(false);
     setVoicePaused(false);
+    setNeedsGesture(false);
   }, [clearRetryTimer]);
+
+  // 懒创建，处理函数只绑一次，靠 ref 取最新回调
+  const ensureAudio = useCallback(() => {
+    let audio = audioRef.current;
+    if (audio) return audio;
+    audio = new Audio();
+    audio.preload = 'auto';
+    audio.onended = () => {
+      setVoiceSpeaking(false);
+      setVoicePaused(false);
+      audio!.currentTime = 0;
+      // 只有自然播完才会走到这里；pause / 换 src 不会触发 onended
+      onEndRef.current?.();
+    };
+    audio.onerror = () => {
+      // 切换 src 时旧请求的报错可能迟到，只认当前地址
+      if (audio!.getAttribute('src') !== currentSrcRef.current) return;
+      setVoiceSpeaking(false);
+      setVoicePaused(false);
+      console.error('[narration] 音频加载失败', audio!.error?.code, audio!.error?.message);
+      setVoiceError('音频加载失败，请检查文件是否存在。');
+    };
+    audioRef.current = audio;
+    return audio;
+  }, []);
 
   const { stop: ttsStop } = tts;
 
   // 切换来源 / 切换故事 / 音频地址变化时，两条路径都要停。
-  // 音色模式下如果只停 TTS，旧的 Audio 元素会留在 ref 里，
-  // 下一篇 play() 复用它，就会继续播上一篇的音频。
+  // audio 元素本身保留（手机上靠它记住“已解锁”），只暂停并归零。
   useEffect(() => {
     setVoiceError(null);
     ttsStop();
@@ -100,6 +131,35 @@ export function useNarration({
   }, [voiceMode, voiceId, storyId, audioSrc, ttsStop, teardownAudio]);
 
   useEffect(() => () => teardownAudio(), [teardownAudio]);
+
+  // 被自动播放策略拦下时，等用户在页面任意处点一下再续播：
+  // 只有在手势上下文里调用 play()，手机浏览器才允许出声。
+  useEffect(() => {
+    if (!needsGesture) return;
+    const handler = () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      playTokenRef.current += 1;
+      setNeedsGesture(false);
+      audio
+        .play()
+        .then(() => {
+          setVoiceSpeaking(true);
+          setVoicePaused(false);
+          setVoiceError(null);
+        })
+        .catch((error: unknown) => {
+          console.error('[narration] 手势后仍无法播放', error);
+          setVoiceError('音频播放失败，请稍后再试。');
+        });
+    };
+    window.addEventListener('pointerdown', handler, { once: true });
+    window.addEventListener('keydown', handler, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', handler);
+      window.removeEventListener('keydown', handler);
+    };
+  }, [needsGesture]);
 
   const play = useCallback(
     (fromIndex = 0) => {
@@ -112,32 +172,13 @@ export function useNarration({
         setVoiceError('这篇故事还没有这个音色的音频文件。');
         return;
       }
-      let audio = audioRef.current;
-      // 防御：元素绑定的还是别的地址时重建，避免切换故事后仍播上一篇
-      if (audio && audio.getAttribute('src') !== audioSrc) {
-        teardownAudio();
-        audio = null;
+      const element = ensureAudio();
+      // 只换地址、复用元素：新建元素会丢掉手势授权，手机自动续播会被拒
+      if (element.getAttribute('src') !== audioSrc) {
+        currentSrcRef.current = audioSrc;
+        element.src = audioSrc;
+        element.load();
       }
-      if (!audio) {
-        audio = new Audio(audioSrc);
-        audio.preload = 'auto';
-        audio.onended = () => {
-          setVoiceSpeaking(false);
-          setVoicePaused(false);
-          if (audio) audio.currentTime = 0;
-          // 只有自然播完才会走到这里；teardown / pause 不会触发 onended
-          onEndRef.current?.();
-        };
-        audio.onerror = () => {
-          setVoiceSpeaking(false);
-          setVoicePaused(false);
-          // 这里才是真正的加载失败（404 / 解码错误），播放被拒不会走到这里
-          console.error('[narration] 音频加载失败', audio?.error?.code, audio?.error?.message);
-          setVoiceError('音频加载失败，请检查文件是否存在。');
-        };
-        audioRef.current = audio;
-      }
-      const element = audio;
       element.playbackRate = rate;
 
       const token = ++playTokenRef.current;
@@ -153,12 +194,22 @@ export function useNarration({
             setVoiceSpeaking(true);
             setVoicePaused(false);
             setVoiceError(null);
+            setNeedsGesture(false);
           })
           .catch((error: unknown) => {
             // 已经被停止或换了故事，这次失败与当前播放无关，静默丢弃
             if (token !== playTokenRef.current) return;
+            // 自动播放策略：重试再多也没用，等用户点一下才可能恢复
+            if ((error as { name?: string })?.name === 'NotAllowedError') {
+              console.warn('[narration] 浏览器要求用户手势，等待点击后继续');
+              setVoiceSpeaking(false);
+              setVoicePaused(false);
+              setVoiceError(null);
+              setNeedsGesture(true);
+              return;
+            }
             if (remaining > 0) {
-              // 自动播放策略拦截、解码未就绪等瞬时失败，等一会儿重试即可
+              // 解码未就绪、网络瞬时失败，等一会儿重试即可
               console.warn(
                 `[narration] 播放失败，${retryDelay}ms 后重试（剩 ${remaining} 次）`,
                 error,
@@ -231,5 +282,6 @@ export function useNarration({
     stop,
     mode: voiceMode ? 'voice' : 'tts',
     error: voiceMode ? voiceError : null,
+    needsGesture: voiceMode ? needsGesture : false,
   };
 }
