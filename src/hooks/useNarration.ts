@@ -62,7 +62,21 @@ export function useNarration({
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // 播放尝试的代号：teardown 或新一轮播放都会 +1，
+  // 用来丢弃过期的失败回调与重试定时器，避免旧请求把新播放误判为失败。
+  const playTokenRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
+
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
+
   const teardownAudio = useCallback(() => {
+    playTokenRef.current += 1;
+    clearRetryTimer();
     const audio = audioRef.current;
     if (audio) {
       audio.onended = null;
@@ -72,7 +86,7 @@ export function useNarration({
     }
     setVoiceSpeaking(false);
     setVoicePaused(false);
-  }, []);
+  }, [clearRetryTimer]);
 
   const { stop: ttsStop } = tts;
 
@@ -117,23 +131,53 @@ export function useNarration({
         audio.onerror = () => {
           setVoiceSpeaking(false);
           setVoicePaused(false);
+          // 这里才是真正的加载失败（404 / 解码错误），播放被拒不会走到这里
+          console.error('[narration] 音频加载失败', audio?.error?.code, audio?.error?.message);
           setVoiceError('音频加载失败，请检查文件是否存在。');
         };
         audioRef.current = audio;
       }
-      audio.playbackRate = rate;
-      audio
-        .play()
-        .then(() => {
-          setVoiceSpeaking(true);
-          setVoicePaused(false);
-        })
-        .catch(() => {
-          setVoiceSpeaking(false);
-          setVoiceError('音频播放失败，请稍后再试。');
-        });
+      const element = audio;
+      element.playbackRate = rate;
+
+      const token = ++playTokenRef.current;
+      clearRetryTimer();
+      const retries = 3;
+      const retryDelay = 500;
+
+      const attempt = (remaining: number) => {
+        element
+          .play()
+          .then(() => {
+            if (token !== playTokenRef.current) return;
+            setVoiceSpeaking(true);
+            setVoicePaused(false);
+            setVoiceError(null);
+          })
+          .catch((error: unknown) => {
+            // 已经被停止或换了故事，这次失败与当前播放无关，静默丢弃
+            if (token !== playTokenRef.current) return;
+            if (remaining > 0) {
+              // 自动播放策略拦截、解码未就绪等瞬时失败，等一会儿重试即可
+              console.warn(
+                `[narration] 播放失败，${retryDelay}ms 后重试（剩 ${remaining} 次）`,
+                error,
+              );
+              retryTimerRef.current = window.setTimeout(() => {
+                retryTimerRef.current = null;
+                if (token !== playTokenRef.current) return;
+                attempt(remaining - 1);
+              }, retryDelay);
+              return;
+            }
+            console.error('[narration] 播放失败（已重试 3 次）', error);
+            setVoiceSpeaking(false);
+            setVoiceError('音频播放失败，请稍后再试。');
+          });
+      };
+      attempt(retries);
     },
-    [voiceMode, tts, hasVoice, audioSrc, rate, storyId],
+    [voiceMode, tts, hasVoice, audioSrc, rate, storyId, clearRetryTimer],
   );
 
   const pause = useCallback(() => {
@@ -155,12 +199,18 @@ export function useNarration({
     }
     const audio = audioRef.current;
     if (audio && audio.paused) {
+      // 用户手动恢复：作废待执行的重试，直接播一次
+      playTokenRef.current += 1;
+      clearRetryTimer();
       audio
         .play()
         .then(() => setVoicePaused(false))
-        .catch(() => setVoiceError('音频播放失败，请稍后再试。'));
+        .catch((error: unknown) => {
+          console.error('[narration] 恢复播放失败', error);
+          setVoiceError('音频播放失败，请稍后再试。');
+        });
     }
-  }, [voiceMode, tts]);
+  }, [voiceMode, tts, clearRetryTimer]);
 
   const stop = useCallback(() => {
     if (voiceMode) {
